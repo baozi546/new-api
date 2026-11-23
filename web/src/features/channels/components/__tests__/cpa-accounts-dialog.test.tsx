@@ -10,8 +10,6 @@ import { expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
 
-import { ChannelCard } from '../channel-card'
-import { ChannelsProvider } from '../channels-provider'
 import {
   CPAAccountsDialog,
   CPAChannelPoolProvider,
@@ -207,69 +205,6 @@ test('an empty channel opens account sign-in bound to its own pool', async () =>
       url: '/api/cpa/accounts/login',
       data: { channel_id: 7 },
     })
-  } finally {
-    view.unmount()
-    client.clear()
-    request.mockRestore()
-  }
-})
-
-test('the card view shows the channel pool and opens its account list', async () => {
-  const request = vi
-    .spyOn(api, 'request')
-    .mockImplementation(async (options) => {
-      let data: unknown = {
-        flow: 'first-flow',
-        url: 'https://auth.example.test/login',
-      }
-      if (options.url?.endsWith('/bindings')) {
-        data = {
-          endpoints: [],
-          channels: [{ id: 7, name: 'CPA', pool: 'first' }],
-        }
-      } else if (options.method === 'GET') {
-        data = [
-          {
-            id: 'first-account',
-            channel_pool_id: 'first',
-            account_pool: 'pro',
-            account_check: {},
-          },
-          {
-            id: 'other-account',
-            channel_pool_id: 'second',
-            account_pool: 'pro',
-            account_check: {},
-          },
-        ]
-      }
-      return { data: { success: true, data } }
-    })
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  })
-  const row = {
-    original: { id: 7, name: 'CPA', type: 1, status: 1, group: 'default' },
-    getAllCells: () => [],
-  } as never
-  const view = render(
-    <QueryClientProvider client={client}>
-      <ChannelsProvider>
-        <CPAChannelPoolProvider enabled>
-          <ChannelCard row={row} isSelected={false} />
-        </CPAChannelPoolProvider>
-      </ChannelsProvider>
-    </QueryClientProvider>
-  )
-  try {
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: '0 of 1 accounts need attention',
-      })
-    )
-    await screen.findByRole('dialog', { name: /CPA · CPA accounts/ })
-    expect(screen.getByRole('row', { name: /first-account/ })).toBeTruthy()
-    expect(screen.queryByRole('row', { name: /other-account/ })).toBeNull()
   } finally {
     view.unmount()
     client.clear()

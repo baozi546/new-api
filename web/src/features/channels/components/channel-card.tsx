@@ -28,7 +28,6 @@ import { isTagAggregateRow, parseGroupsList } from '../lib'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
 import { useChannels } from './channels-provider'
-import { CPAChannelPoolStatus } from './cpa-accounts-dialog'
 
 const SENSITIVE_MASK = '••••'
 
@@ -118,7 +117,6 @@ function ChannelCardComponent({
                 </div>
               )}
               {nameCell}
-              {!isTagRow && <CPAChannelPoolStatus id={row.original.id} />}
             </div>
             <div
               data-column-id='priority'
