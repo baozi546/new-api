@@ -1,5 +1,13 @@
 {
   "translation": {
+    "Add account to pool": "加入帳號池",
+    "Detect from subscription": "依訂閱識別",
+    "Selecting a pool at sign-in requires the matching CPA build": "請升級配套 CPA 版本後再於授權時選擇帳號池",
+    "Shared CPA pool": "共用 CPA 帳號池",
+    "{{issues}} of {{total}} accounts need attention": "{{total}} 個帳號中有 {{issues}} 個異常",
+    "Account status unavailable": "無法讀取帳號狀態",
+    "Quota blocked": "額度已耗盡",
+    "Temporarily unavailable": "暫時無法使用",
     "CPA accounts": "CPA 帳號",
     "Account pool": "帳號池",
     "Concurrent request limit": "併發上限",

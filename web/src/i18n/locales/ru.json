@@ -1,5 +1,13 @@
 {
   "translation": {
+    "Add account to pool": "Добавить аккаунт в пул",
+    "Detect from subscription": "Определить по подписке",
+    "Selecting a pool at sign-in requires the matching CPA build": "Для выбора пула при входе требуется совместимая версия CPA",
+    "Shared CPA pool": "Общий пул CPA",
+    "{{issues}} of {{total}} accounts need attention": "Требуют внимания {{issues}} из {{total}} аккаунтов",
+    "Account status unavailable": "Состояние аккаунтов недоступно",
+    "Quota blocked": "Квота исчерпана",
+    "Temporarily unavailable": "Временно недоступно",
     "CPA accounts": "Аккаунты CPA",
     "Account pool": "Пул аккаунтов",
     "Concurrent request limit": "Лимит одновременных запросов",

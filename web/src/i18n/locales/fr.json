@@ -1,5 +1,13 @@
 {
   "translation": {
+    "Add account to pool": "Ajouter le compte au groupe",
+    "Detect from subscription": "Détecter selon le forfait",
+    "Selecting a pool at sign-in requires the matching CPA build": "La sélection du groupe à la connexion nécessite la version CPA compatible",
+    "Shared CPA pool": "Groupe CPA partagé",
+    "{{issues}} of {{total}} accounts need attention": "{{issues}} comptes sur {{total}} nécessitent une intervention",
+    "Account status unavailable": "État des comptes indisponible",
+    "Quota blocked": "Quota épuisé",
+    "Temporarily unavailable": "Temporairement indisponible",
     "CPA accounts": "Comptes CPA",
     "Account pool": "Groupe de comptes",
     "Concurrent request limit": "Limite de requêtes simultanées",

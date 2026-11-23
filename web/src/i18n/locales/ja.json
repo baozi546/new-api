@@ -1,5 +1,13 @@
 {
   "translation": {
+    "Add account to pool": "追加先のアカウントプール",
+    "Detect from subscription": "サブスクリプションから判定",
+    "Selecting a pool at sign-in requires the matching CPA build": "ログイン時のプール選択には対応する CPA バージョンが必要です",
+    "Shared CPA pool": "共有 CPA プール",
+    "{{issues}} of {{total}} accounts need attention": "{{total}} 件中 {{issues}} 件のアカウントに問題があります",
+    "Account status unavailable": "アカウントの状態を取得できません",
+    "Quota blocked": "割り当て量を超過",
+    "Temporarily unavailable": "一時的に利用不可",
     "CPA accounts": "CPA アカウント",
     "Account pool": "アカウントプール",
     "Concurrent request limit": "同時リクエスト上限",

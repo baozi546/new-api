@@ -3,7 +3,6 @@ package service
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -32,9 +31,27 @@ type CPAAccount struct {
 	Label         string   `json:"label"`
 	Disabled      bool     `json:"disabled"`
 	RequiresLogin bool     `json:"requires_sign_in"`
+	Unavailable   bool     `json:"unavailable"`
+	QuotaBlocked  bool     `json:"quota_blocked"`
+	Status        string   `json:"status"`
 	Limit         *int     `json:"account_concurrency"`
 	Pool          string   `json:"account_pool"`
 	Check         CPACheck `json:"account_check"`
+}
+
+// Only exact relay endpoints share a pool. An unrelated gateway on the same host
+// can serve an entirely different credential set under another path.
+func CPAChannelEndpoint(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return ""
+	}
+	u.Host = strings.ToLower(u.Host)
+	if (u.Scheme == "http" && u.Port() == "80") || (u.Scheme == "https" && u.Port() == "443") {
+		u.Host = strings.TrimSuffix(u.Host, ":"+u.Port())
+	}
+	path := strings.TrimSuffix(strings.TrimRight(u.EscapedPath(), "/"), "/v1")
+	return u.Scheme + "://" + u.Host + path
 }
 
 var cpaManagementHTTP = &http.Client{Timeout: 90 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
@@ -49,7 +66,7 @@ func CallCPAManagement(ctx context.Context, method, path string, input, output a
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
 		return errors.New("Invalid CPA management URL")
 	}
-	body, err := json.Marshal(input)
+	body, err := common.Marshal(input)
 	if err != nil {
 		return err
 	}
@@ -74,7 +91,7 @@ func CallCPAManagement(ctx context.Context, method, path string, input, output a
 	if output == nil {
 		return nil
 	}
-	if err = json.NewDecoder(io.LimitReader(res.Body, 16<<20)).Decode(output); err != nil {
+	if err = common.DecodeJson(io.LimitReader(res.Body, 16<<20), output); err != nil {
 		return errors.New("Invalid CPA management response")
 	}
 	return nil

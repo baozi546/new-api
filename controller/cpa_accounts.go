@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -19,6 +20,36 @@ func ListCPAAccounts(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, accounts)
+}
+
+func ListCPAChannelIDs(c *gin.Context) {
+	ids := make([]int, 0)
+	endpoint := service.CPAChannelEndpoint(os.Getenv("CPA_MANAGEMENT_URL"))
+	if endpoint == "" {
+		common.ApiSuccess(c, ids)
+		return
+	}
+	endpoints := map[string]bool{endpoint: true}
+	for _, alias := range strings.Split(os.Getenv("CPA_RELAY_URLS"), ",") {
+		if normalized := service.CPAChannelEndpoint(alias); normalized != "" {
+			endpoints[normalized] = true
+		}
+	}
+	var channels []struct {
+		Id      int
+		BaseURL string `gorm:"column:base_url"`
+	}
+	err := model.DB.WithContext(c.Request.Context()).Model(&model.Channel{}).Select("id", "base_url").Where("base_url IS NOT NULL AND base_url <> ?", "").Order("id").Find(&channels).Error
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for _, ch := range channels {
+		if endpoints[service.CPAChannelEndpoint(ch.BaseURL)] {
+			ids = append(ids, ch.Id)
+		}
+	}
+	common.ApiSuccess(c, ids)
 }
 
 func ChangeCPAAccount(c *gin.Context) {
@@ -88,6 +119,7 @@ func CPAAccountLogin(c *gin.Context) {
 	var input struct {
 		Flow     string `json:"flow"`
 		Callback string `json:"callback"`
+		Pool     string `json:"pool"`
 	}
 	if c.ShouldBindJSON(&input) != nil {
 		common.ApiErrorT(c, "Invalid parameters")
@@ -100,12 +132,27 @@ func CPAAccountLogin(c *gin.Context) {
 			common.ApiErrorT(c, "Invalid parameters")
 			return
 		}
+		body := map[string]string{"provider": "codex"}
+		if input.Pool != "" {
+			switch input.Pool {
+			case "unassigned", "plus", "pro", "degraded":
+				body["account_pool"] = input.Pool
+			default:
+				common.ApiErrorT(c, "Invalid parameters")
+				return
+			}
+		}
 		var start struct {
 			URL   string `json:"url"`
 			State string `json:"state"`
+			Pool  string `json:"account_pool"`
 		}
-		if err := service.CallCPAManagement(ctx, "POST", "oauth/auth-url", map[string]any{"provider": "codex"}, &start); err != nil {
+		if err := service.CallCPAManagement(ctx, "POST", "oauth/auth-url", body, &start); err != nil {
 			common.ApiError(c, err)
+			return
+		}
+		if input.Pool != "" && start.Pool != input.Pool {
+			common.ApiErrorT(c, "Selecting a pool at sign-in requires the matching CPA build")
 			return
 		}
 		u, err := url.Parse(start.URL)
@@ -119,6 +166,10 @@ func CPAAccountLogin(c *gin.Context) {
 			return
 		}
 		common.ApiSuccess(c, gin.H{"flow": token, "url": start.URL})
+		return
+	}
+	if input.Pool != "" {
+		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
 	flow, err := model.GetAuthFlow(input.Flow, match)

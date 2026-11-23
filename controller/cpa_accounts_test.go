@@ -51,3 +51,44 @@ func TestCPAAccountLoginBindsCallbackToSession(t *testing.T) {
 	require.False(t, response.Success)
 	require.Equal(t, 1, callbacks)
 }
+
+func TestCPAAccountLoginRequiresPoolAcknowledgement(t *testing.T) {
+	setupTaskPluginBindChannelTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.AuthFlow{}))
+	ack := ""
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var input map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Error(err)
+		}
+		if input["account_pool"] != "pro" || input["provider"] != "codex" {
+			t.Error("pool or provider missing")
+		}
+		calls++
+		fmt.Fprintf(w, `{"url":"https://auth.openai.com/authorize?state=test","state":"test","account_pool":%q}`, ack)
+	}))
+	defer server.Close()
+	t.Setenv("CPA_MANAGEMENT_URL", server.URL)
+	t.Setenv("CPA_MANAGEMENT_TOKEN", "fixture")
+	response, _ := callChannelAPI(t, CPAAccountLogin, "POST", "/api/cpa/accounts/login", `{"pool":"other"}`)
+	require.False(t, response.Success)
+	require.Zero(t, calls)
+	response, _ = callChannelAPI(t, CPAAccountLogin, "POST", "/api/cpa/accounts/login", `{"pool":"pro"}`)
+	require.False(t, response.Success)
+	ack = "pro"
+	response, raw := callChannelAPI(t, CPAAccountLogin, "POST", "/api/cpa/accounts/login", `{"pool":"pro"}`)
+	require.True(t, response.Success, raw)
+}
+
+func TestCPAChannelIDsMatchOnlyConfiguredRelayEndpoints(t *testing.T) {
+	setupTaskPluginBindChannelTest(t)
+	t.Setenv("CPA_MANAGEMENT_URL", "http://internal:8317")
+	t.Setenv("CPA_RELAY_URLS", "https://example.test/tenant-a")
+	for i, endpoint := range []string{"http://internal:8317/v1/", "https://EXAMPLE.test:443/tenant-a/v1", "https://example.test/tenant-b", "https://unrelated.test"} {
+		require.NoError(t, model.DB.Create(&model.Channel{Id: i + 1, Name: "channel", Key: "fixture", BaseURL: &endpoint}).Error)
+	}
+	response, raw := callChannelAPI(t, ListCPAChannelIDs, "GET", "/api/cpa/accounts/channels", "")
+	require.True(t, response.Success, raw)
+	require.JSONEq(t, `[1,2]`, string(response.Data))
+}

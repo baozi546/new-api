@@ -211,6 +211,7 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.POST("/subscription/epay/return", anonymousRequestBodyLimit, controller.SubscriptionEpayReturn)
 		accounts := apiRouter.Group("/cpa/accounts", middleware.RootAuth(), middleware.DisableCache())
 		accounts.GET("", controller.ListCPAAccounts)
+		accounts.GET("/channels", controller.ListCPAChannelIDs)
 		accounts.PATCH("", middleware.SessionCookieOriginGuard(), controller.ChangeCPAAccount)
 		accounts.POST("/login", middleware.SessionCookieOriginGuard(), middleware.CriticalRateLimit(), controller.CPAAccountLogin)
 		optionRoute := apiRouter.Group("/option")

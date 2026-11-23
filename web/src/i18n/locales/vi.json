@@ -1,5 +1,13 @@
 {
   "translation": {
+    "Add account to pool": "Thêm tài khoản vào nhóm",
+    "Detect from subscription": "Nhận diện theo gói đăng ký",
+    "Selecting a pool at sign-in requires the matching CPA build": "Cần phiên bản CPA tương thích để chọn nhóm khi đăng nhập",
+    "Shared CPA pool": "Nhóm CPA dùng chung",
+    "{{issues}} of {{total}} accounts need attention": "{{issues}} trong số {{total}} tài khoản cần kiểm tra",
+    "Account status unavailable": "Không thể đọc trạng thái tài khoản",
+    "Quota blocked": "Đã hết hạn mức",
+    "Temporarily unavailable": "Tạm thời không khả dụng",
     "CPA accounts": "Tài khoản CPA",
     "Account pool": "Nhóm tài khoản",
     "Concurrent request limit": "Giới hạn yêu cầu đồng thời",

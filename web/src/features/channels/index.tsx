@@ -34,7 +34,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { getChannelOps } from './api'
 import { ChannelsDialogs } from './components/channels-dialogs'
-import { CPAAccountsDialog } from './components/cpa-accounts-dialog'
+import { CPAAccountsDialog, CPAChannelPoolProvider } from './components/cpa-accounts-dialog'
 import { ChannelsPrimaryButtons } from './components/channels-primary-buttons'
 import { ChannelsProvider } from './components/channels-provider'
 import { ChannelsTable } from './components/channels-table'
@@ -88,6 +88,7 @@ export function Channels() {
 
   return (
     <ChannelsProvider>
+      <CPAChannelPoolProvider enabled={isRoot}>
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>
           <span className='flex min-w-0 items-center gap-2'>
@@ -105,6 +106,7 @@ export function Channels() {
       </SectionPageLayout>
 
       <ChannelsDialogs />
+      </CPAChannelPoolProvider>
     </ChannelsProvider>
   )
 }

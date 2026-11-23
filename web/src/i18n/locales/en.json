@@ -1,5 +1,13 @@
 {
   "translation": {
+    "Add account to pool": "Add account to pool",
+    "Detect from subscription": "Detect from subscription",
+    "Selecting a pool at sign-in requires the matching CPA build": "Selecting a pool at sign-in requires the matching CPA build",
+    "Shared CPA pool": "Shared CPA pool",
+    "{{issues}} of {{total}} accounts need attention": "{{issues}} of {{total}} accounts need attention",
+    "Account status unavailable": "Account status unavailable",
+    "Quota blocked": "Quota blocked",
+    "Temporarily unavailable": "Temporarily unavailable",
     "CPA accounts": "CPA accounts",
     "Account pool": "Account pool",
     "Concurrent request limit": "Concurrent request limit",
