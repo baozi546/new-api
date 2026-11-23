@@ -58,6 +58,12 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/verify/methods":             accessTokenAnyRule,
 	"POST /api/verify":                    accessTokenAnyRule,
 
+	"GET /api/cpa/accounts/channels/:id/limit":   accessTokenSessionRule,
+	"POST /api/cpa/accounts/channels/:id/limit":  accessTokenSessionRule,
+	"GET /api/channel-inspections":               accessTokenSessionRule,
+	"GET /api/cpa/accounts/inspections":          accessTokenSessionRule,
+	"POST /api/cpa/accounts/inspections/:id":     accessTokenSessionRule,
+	"POST /api/cpa/accounts/inspections/:id/run": accessTokenSessionRule,
 	// Pool administration is an interactive dashboard operation.
 	"GET /api/cpa/accounts":          accessTokenSessionRule,
 	"GET /api/cpa/accounts/channels": accessTokenSessionRule,

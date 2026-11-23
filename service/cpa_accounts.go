@@ -26,18 +26,19 @@ type CPACheck struct {
 // Decode only the fields needed by the console. CPA's full response can contain
 // provider metadata, private paths and OAuth identity claims.
 type CPAAccount struct {
-	ChannelPoolID string   `json:"channel_pool_id,omitempty"`
-	ID            string   `json:"id"`
-	Provider      string   `json:"provider"`
-	Label         string   `json:"label"`
-	Disabled      bool     `json:"disabled"`
-	RequiresLogin bool     `json:"requires_sign_in"`
-	Unavailable   bool     `json:"unavailable"`
-	QuotaBlocked  bool     `json:"quota_blocked"`
-	Status        string   `json:"status"`
-	Limit         *int     `json:"account_concurrency"`
-	Pool          string   `json:"account_pool"`
-	Check         CPACheck `json:"account_check"`
+	PoolManagedLimit bool     `json:"pool_managed_limit,omitempty"`
+	ChannelPoolID    string   `json:"channel_pool_id,omitempty"`
+	ID               string   `json:"id"`
+	Provider         string   `json:"provider"`
+	Label            string   `json:"label"`
+	Disabled         bool     `json:"disabled"`
+	RequiresLogin    bool     `json:"requires_sign_in"`
+	Unavailable      bool     `json:"unavailable"`
+	QuotaBlocked     bool     `json:"quota_blocked"`
+	Status           string   `json:"status"`
+	Limit            *int     `json:"account_concurrency"`
+	Pool             string   `json:"account_pool"`
+	Check            CPACheck `json:"account_check"`
 }
 
 // Only exact relay endpoints share a pool. An unrelated gateway on the same host
@@ -158,8 +159,21 @@ func StartCPAAccountChecks() {
 				common.SysError(err.Error())
 				continue
 			}
+			// Channels configured in the console own the schedule for their pool.
+			// Legacy deployments continue polling their other pools.
+			managed := map[string]bool{}
+			common.OptionMapRWMutex.RLock()
+			for key := range common.OptionMap {
+				if strings.HasPrefix(key, "CPAInspection/") && strings.HasSuffix(key, "/settings") {
+					parts := strings.Split(key, "/")
+					if len(parts) == 4 {
+						managed[parts[2]] = true
+					}
+				}
+			}
+			common.OptionMapRWMutex.RUnlock()
 			for _, a := range accounts {
-				if a.Disabled || a.Limit == nil {
+				if a.Disabled || a.Limit == nil || managed[a.ChannelPoolID] {
 					continue
 				}
 				if err := CallCPAManagement(context.Background(), "POST", "credentials/quality-check", map[string]string{"name": a.ID, "model": model}, nil); err != nil {

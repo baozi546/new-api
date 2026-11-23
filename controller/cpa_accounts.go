@@ -100,7 +100,9 @@ func ChangeCPAAccount(c *gin.Context) {
 			return
 		}
 		path = "credentials/fields"
-		body["account_concurrency"] = *input.Limit
+		if !account.PoolManagedLimit {
+			body["account_concurrency"] = *input.Limit
+		}
 		body["account_pool"] = input.Pool
 	}
 	if err = service.CallCPAManagement(ctx, "PATCH", path, body, nil); err != nil {
@@ -221,4 +223,36 @@ func CPAAccountLogin(c *gin.Context) {
 		return
 	}
 	common.ApiSuccess(c, gin.H{"status": status.Status})
+}
+
+func ChannelPoolAccountLimit(c *gin.Context) {
+	ch := inspectionTarget(c)
+	if ch == nil {
+		return
+	}
+	path := "channel-pools/" + ch.CPAPoolID + "/account-limit"
+	var result struct {
+		Limit *int `json:"limit"`
+	}
+	method := http.MethodGet
+	var body any
+	if c.Request.Method == http.MethodPost {
+		var in struct {
+			Limit *int `json:"limit"`
+		}
+		if c.ShouldBindJSON(&in) != nil || in.Limit == nil || *in.Limit < 0 || *in.Limit > 1000000 {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		body = in
+		method = http.MethodPut
+	}
+	if err := service.CallCPAManagement(c.Request.Context(), method, path, body, &result); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if method == http.MethodPut {
+		recordManageAudit(c, "channel.update", map[string]any{"source": "pool_account_limit", "channel_id": ch.Id})
+	}
+	common.ApiSuccess(c, result)
 }

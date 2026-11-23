@@ -97,6 +97,7 @@ export function Channels() {
           </span>
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
+          {canManageCPA && <Link className='rounded-md border px-3 py-2 text-sm font-medium' to='/channel-inspections'>{t('Channel inspections')}</Link>}
           {canManageCPA && <CPAAccountsDialog />}
           <ChannelsPrimaryButtons />
         </SectionPageLayout.Actions>

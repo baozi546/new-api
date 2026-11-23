@@ -85,6 +85,11 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             icon: LayoutDashboard,
           },
           {
+            title: t('Channel inspections'),
+            url: '/channel-inspections',
+            icon: Activity,
+          },
+          {
             title: t('API Keys'),
             url: '/keys',
             icon: Key,

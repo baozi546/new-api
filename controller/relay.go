@@ -231,18 +231,26 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		// The request plugins' reply checks read the answer this attempt
 		// writes; without a reply instance nothing changes.
-		finishReply := requestplugin.Reply(c, relayFormat, relayInfo)
-		switch relayFormat {
-		case types.RelayFormatOpenAIRealtime:
-			newAPIError = relay.WssHelper(c, relayInfo)
-		case types.RelayFormatClaude:
-			newAPIError = relay.ClaudeHelper(c, relayInfo)
-		case types.RelayFormatGemini:
-			newAPIError = geminiRelayHandler(c, relayInfo)
-		default:
-			newAPIError = relayHandler(c, relayInfo)
+		release, waitErr := service.AcquireChannelSlot(c.Request.Context(), channel.Id)
+		if waitErr != nil {
+			newAPIError = types.NewErrorWithStatusCode(waitErr, types.ErrorCodeGetChannelFailed, http.StatusRequestTimeout, types.ErrOptionWithSkipRetry())
+			break
 		}
-		finishReply()
+		func() {
+			defer release()
+			finishReply := requestplugin.Reply(c, relayFormat, relayInfo)
+			switch relayFormat {
+			case types.RelayFormatOpenAIRealtime:
+				newAPIError = relay.WssHelper(c, relayInfo)
+			case types.RelayFormatClaude:
+				newAPIError = relay.ClaudeHelper(c, relayInfo)
+			case types.RelayFormatGemini:
+				newAPIError = geminiRelayHandler(c, relayInfo)
+			default:
+				newAPIError = relayHandler(c, relayInfo)
+			}
+			finishReply()
+		}()
 
 		if newAPIError == nil {
 			service.MarkRequestPolicySuccess(c, relayInfo.StreamStatus)

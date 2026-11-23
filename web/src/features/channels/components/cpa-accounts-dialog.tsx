@@ -15,10 +15,10 @@ import { Input } from '@/components/ui/input'
 import { formatTimestampToDate } from '@/lib/format'
 
 import { request, useCPABindings, type Binding } from '../lib/cpa-channel-pools'
-
 import { CPAAccountImport } from './cpa-account-import'
 
 type Account = {
+  pool_managed_limit?: boolean
   channel_pool_id?: string
   id: string
   label: string
@@ -154,6 +154,79 @@ export function CPAChannelPoolStatus({ id }: { id: number }) {
     </Button>
   )
 }
+function PoolLimit({
+  binding,
+  refresh,
+}: {
+  binding: Binding
+  refresh: () => Promise<void>
+}) {
+  const { t } = useTranslation()
+  const path = `/channels/${binding.id}/limit`
+  const current = useQuery({
+    queryKey: ['pool-account-limit', binding.pool],
+    queryFn: () => request<{ limit: number | null }>('GET', path),
+    retry: false,
+  })
+  const [draft, setDraft] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+  const value = draft ?? String(current.data?.limit ?? '')
+  async function save() {
+    setBusy(true)
+    setNotice('')
+    try {
+      await request('POST', path, { limit: Number(value) })
+      await Promise.all([current.refetch(), refresh()])
+      setDraft(null)
+      setNotice(t('Saved'))
+    } catch (e) {
+      setNotice(t(e instanceof Error ? e.message : 'Request failed'))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <div className='space-y-1 rounded-md border p-3'>
+      <div className='flex flex-wrap items-center gap-2'>
+        <label>
+          {t('Per-account limit for this pool')}
+          <Input
+            className='w-24'
+            type='number'
+            min={0}
+            max={1000000}
+            value={value}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+        </label>
+        <Button
+          variant='outline'
+          size='sm'
+          disabled={
+            busy ||
+            !current.isSuccess ||
+            !value ||
+            !Number.isInteger(Number(value)) ||
+            Number(value) < 0 ||
+            Number(value) > 1000000
+          }
+          onClick={save}
+        >
+          {t('Save')}
+        </Button>
+      </div>
+      <p className='text-muted-foreground text-xs'>
+        {t(
+          'Applies to current and future accounts in the pool. Shared channels use the same limit. Zero means unlimited.'
+        )}
+      </p>
+      {(notice || current.isError) && (
+        <p role='status'>{notice || t('Account status unavailable')}</p>
+      )}
+    </div>
+  )
+}
 function AccountRow({
   account,
   onChange,
@@ -205,6 +278,7 @@ function AccountRow({
       <td className='p-2'>
         <div className='flex items-center gap-1'>
           <Input
+            readOnly={account.pool_managed_limit}
             className='w-20'
             aria-label={t('Concurrent request limit')}
             type='number'
@@ -358,6 +432,7 @@ export function CPAAccountsDialog({
         contentClassName='sm:max-w-5xl'
         bodyClassName='space-y-4'
       >
+        {binding?.pool && <PoolLimit binding={binding} refresh={reload} />}
         <div className='flex flex-wrap items-center gap-3'>
           <select
             aria-label={t('Account pool')}
@@ -412,7 +487,13 @@ export function CPAAccountsDialog({
             </Button>
           </div>
         )}
-        {binding?.pool && <CPAAccountImport channelId={binding.id} category={targetPool} onChange={reload} />}
+        {binding?.pool && (
+          <CPAAccountImport
+            channelId={binding.id}
+            category={targetPool}
+            onChange={reload}
+          />
+        )}
         {login && (
           <div className='flex flex-wrap items-center gap-2'>
             <a

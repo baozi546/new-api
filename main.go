@@ -117,6 +117,7 @@ func main() {
 	controller.SyncTaskPluginsOnce()
 	if common.IsMasterNode {
 		service.StartCPAAccountChecks()
+		controller.StartChannelInspectionSchedule()
 	}
 
 	// Every node reloads a topic within seconds of a write to it on any node.

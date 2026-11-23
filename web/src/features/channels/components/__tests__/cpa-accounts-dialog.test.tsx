@@ -215,7 +215,7 @@ test('an empty channel opens account sign-in bound to its own pool', async () =>
 
 test('batch import reports each file and array item in the selected channel', async () => {
   const request = vi.spyOn(api, 'request').mockImplementation(async (options) => ({
-    data: { success: true, data: { status: options.data.account.email === 'first' ? 'imported' : 'other_pool' } },
+    data: { success: true, data: { status: (options.data as { account: { email: string } }).account.email === 'first' ? 'imported' : 'other_pool' } },
   }))
   const reload = vi.fn(async () => {})
   const view = render(<CPAAccountImport channelId={7} category='pro' onChange={reload} />)
