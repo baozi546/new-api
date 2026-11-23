@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Batch import JSON": "Nhập hàng loạt JSON",
+    "Invalid CPA backup": "Bản sao lưu CPA không hợp lệ",
+    "Imported (disabled)": "Đã nhập (đã tắt)",
+    "Account already exists": "Tài khoản đã tồn tại",
+    "Import failed": "Nhập thất bại",
     "Subscription label": "Nhãn gói đăng ký",
     "CPA channel pool": "Nhóm tài khoản của kênh",
     "Create a dedicated pool": "Tạo nhóm riêng",

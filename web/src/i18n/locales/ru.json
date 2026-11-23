@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Batch import JSON": "Пакетный импорт JSON",
+    "Invalid CPA backup": "Некорректная копия CPA",
+    "Imported (disabled)": "Импортирован (отключён)",
+    "Account already exists": "Аккаунт уже существует",
+    "Import failed": "Ошибка импорта",
     "Subscription label": "Категория подписки",
     "CPA channel pool": "Пул канала",
     "Create a dedicated pool": "Создать отдельный пул",

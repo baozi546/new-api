@@ -58,6 +58,14 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/verify/methods":             accessTokenAnyRule,
 	"POST /api/verify":                    accessTokenAnyRule,
 
+	// Pool administration is an interactive dashboard operation.
+	"GET /api/cpa/accounts":          accessTokenSessionRule,
+	"GET /api/cpa/accounts/channels": accessTokenSessionRule,
+	"GET /api/cpa/accounts/bindings": accessTokenSessionRule,
+	"PATCH /api/cpa/accounts":        accessTokenSessionRule,
+	"POST /api/cpa/accounts/login":   accessTokenSessionRule,
+	"POST /api/cpa/accounts/import":  accessTokenSessionRule,
+
 	// router/api-router.go: /api/user (self)
 	"GET /api/user/sessions":                       accessTokenSessionRule,
 	"DELETE /api/user/sessions/:sid":               accessTokenSessionRule,

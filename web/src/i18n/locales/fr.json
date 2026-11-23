@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Batch import JSON": "Importer des fichiers JSON",
+    "Invalid CPA backup": "Sauvegarde CPA invalide",
+    "Imported (disabled)": "Importé (désactivé)",
+    "Account already exists": "Le compte existe déjà",
+    "Import failed": "Échec de l'importation",
     "Subscription label": "Catégorie du forfait",
     "CPA channel pool": "Groupe de comptes du canal",
     "Create a dedicated pool": "Créer un groupe dédié",

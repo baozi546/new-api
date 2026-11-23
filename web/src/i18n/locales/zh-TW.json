@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Batch import JSON": "批次匯入 JSON",
+    "Invalid CPA backup": "CPA 備份格式無效",
+    "Imported (disabled)": "已匯入（已停用）",
+    "Account already exists": "帳號已存在",
+    "Import failed": "匯入失敗",
     "Subscription label": "訂閱分類",
     "CPA channel pool": "渠道帳號池",
     "Create a dedicated pool": "建立專屬帳號池",

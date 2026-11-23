@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Batch import JSON": "JSON を一括インポート",
+    "Invalid CPA backup": "CPA バックアップが無効です",
+    "Imported (disabled)": "インポート済み（無効）",
+    "Account already exists": "アカウントは登録済みです",
+    "Import failed": "インポートに失敗しました",
     "Subscription label": "契約プランの分類",
     "CPA channel pool": "チャネルのアカウントプール",
     "Create a dedicated pool": "専用プールを作成",

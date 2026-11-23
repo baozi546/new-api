@@ -152,3 +152,25 @@ func TestCPAChannelCreateShareRenameAndLogin(t *testing.T) {
 	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
 	require.EqualValues(t, 3, count)
 }
+
+func TestCPAImportUsesBoundChannelAndRedactsResponse(t *testing.T) {
+	setupTaskPluginBindChannelTest(t)
+	pool := strings.Repeat("a", 32)
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		require.Equal(t, "/v8/management/channel-pools/"+pool+"/restore", r.URL.Path)
+		require.Equal(t, "Bearer fixture", r.Header.Get("Authorization"))
+		fmt.Fprint(w, `{"status":"imported","extra":"private-fixture"}`)
+	}))
+	defer server.Close()
+	t.Setenv("CPA_MANAGEMENT_URL", server.URL)
+	t.Setenv("CPA_MANAGEMENT_TOKEN", "fixture")
+	require.NoError(t, model.DB.Create(&model.Channel{Id: 17, Type: 1, Name: "pro", Key: "fixture", BaseURL: &server.URL, CPAPoolID: pool}).Error)
+	for _, id := range []int{0, 999, 17} {
+		res, raw := callChannelAPI(t, ImportCPAAccounts, "POST", "/api/cpa/accounts/import", fmt.Sprintf(`{"channel_id":%d,"account":{"type":"codex"}}`, id))
+		require.Equal(t, id == 17, res.Success, raw)
+		require.NotContains(t, raw, "private-fixture")
+	}
+	require.Equal(t, 1, calls)
+}

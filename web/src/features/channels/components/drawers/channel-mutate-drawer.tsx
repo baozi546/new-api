@@ -653,7 +653,7 @@ export function ChannelMutateDrawer({
   const currentBaseUrl = formValues.base_url
   const [sharedCPAPool, setSharedCPAPool] = useState('')
   const cpaBindings = useCPABindings(
-    !isEditing && open && currentUser?.role === ROLE.SUPER_ADMIN
+    !isEditing && open && (currentUser?.role ?? 0) >= ROLE.ADMIN
   )
   const creatingCPA =
     !isEditing &&

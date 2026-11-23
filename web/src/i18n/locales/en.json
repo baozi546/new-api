@@ -1,5 +1,10 @@
 {
   "translation": {
+    "Batch import JSON": "Batch import JSON",
+    "Invalid CPA backup": "Invalid CPA backup",
+    "Imported (disabled)": "Imported (disabled)",
+    "Account already exists": "Account already exists",
+    "Import failed": "Import failed",
     "Subscription label": "Subscription label",
     "CPA channel pool": "CPA channel pool",
     "Create a dedicated pool": "Create a dedicated pool",

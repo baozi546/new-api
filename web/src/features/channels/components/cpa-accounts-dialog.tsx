@@ -16,6 +16,8 @@ import { formatTimestampToDate } from '@/lib/format'
 
 import { request, useCPABindings, type Binding } from '../lib/cpa-channel-pools'
 
+import { CPAAccountImport } from './cpa-account-import'
+
 type Account = {
   channel_pool_id?: string
   id: string
@@ -410,6 +412,7 @@ export function CPAAccountsDialog({
             </Button>
           </div>
         )}
+        {binding?.pool && <CPAAccountImport channelId={binding.id} category={targetPool} onChange={reload} />}
         {login && (
           <div className='flex flex-wrap items-center gap-2'>
             <a

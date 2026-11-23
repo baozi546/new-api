@@ -41,9 +41,9 @@ import { ChannelsTable } from './components/channels-table'
 
 export function Channels() {
   const { t } = useTranslation()
-  const isRoot = useAuthStore(
-    (state) => state.auth.user?.role === ROLE.SUPER_ADMIN
-  )
+  const role = useAuthStore((state) => state.auth.user?.role ?? 0)
+  const isRoot = role === ROLE.SUPER_ADMIN
+  const canManageCPA = role >= ROLE.ADMIN
   const channelOpsQuery = useQuery({
     queryKey: ['channel-ops'],
     queryFn: async () => requireServerSuccess(await getChannelOps()),
@@ -88,7 +88,7 @@ export function Channels() {
 
   return (
     <ChannelsProvider>
-      <CPAChannelPoolProvider enabled={isRoot}>
+      <CPAChannelPoolProvider enabled={canManageCPA}>
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>
           <span className='flex min-w-0 items-center gap-2'>
@@ -97,7 +97,7 @@ export function Channels() {
           </span>
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
-          {isRoot && <CPAAccountsDialog />}
+          {canManageCPA && <CPAAccountsDialog />}
           <ChannelsPrimaryButtons />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>

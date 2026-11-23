@@ -9,6 +9,7 @@ import {
 import { expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
+import { CPAAccountImport } from '../cpa-account-import'
 
 import {
   CPAAccountsDialog,
@@ -208,6 +209,30 @@ test('an empty channel opens account sign-in bound to its own pool', async () =>
   } finally {
     view.unmount()
     client.clear()
+    request.mockRestore()
+  }
+})
+
+test('batch import reports each file and array item in the selected channel', async () => {
+  const request = vi.spyOn(api, 'request').mockImplementation(async (options) => ({
+    data: { success: true, data: { status: options.data.account.email === 'first' ? 'imported' : 'other_pool' } },
+  }))
+  const reload = vi.fn(async () => {})
+  const view = render(<CPAAccountImport channelId={7} category='pro' onChange={reload} />)
+  try {
+    const files = [
+      { name: 'bad.json', size: 3, text: async () => '{' },
+      { name: 'accounts.json', size: 100, text: async () => '[{"email":"first"},{"email":"second"}]' },
+    ]
+    fireEvent.change(screen.getByLabelText('Batch import JSON'), { target: { files } })
+    await screen.findByText('bad.json · Invalid CPA backup')
+    await screen.findByText('accounts.json #1 · Imported (disabled)')
+    await screen.findByText('accounts.json #2 · Account already belongs to another channel pool')
+    expect(request).toHaveBeenCalledTimes(2)
+    expect(request).toHaveBeenCalledWith({ method: 'POST', url: '/api/cpa/accounts/import', data: { channel_id: 7, account: { email: 'second', account_pool: 'pro' } } })
+    expect(reload).toHaveBeenCalledOnce()
+  } finally {
+    view.unmount()
     request.mockRestore()
   }
 })
