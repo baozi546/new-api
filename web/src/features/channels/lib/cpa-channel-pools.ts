@@ -17,7 +17,12 @@ export async function request<T>(
   return r.data.data as T
 }
 
-export type Binding = { id: number; name: string; pool: string }
+export type Binding = {
+  id: number
+  name: string
+  pool: string
+  category?: string
+}
 export function useCPABindings(enabled: boolean) {
   return useQuery({
     queryKey: ['cpa-channel-bindings'],

@@ -18,8 +18,11 @@ func matchesCPAChannel(ch *model.Channel) bool {
 
 func provisionCPAChannel(ctx context.Context, ch *model.Channel, share string) error {
 	ch.CPAPoolID = ""
+	if category := ch.CPAAccountCategory(); category != "" && category != "plus" && category != "pro" && category != "degraded" && category != "unassigned" {
+		return errors.New("Invalid CPA account category")
+	}
 	if !matchesCPAChannel(ch) {
-		if share != "" {
+		if share != "" || ch.CPAAccountCategory() != "" {
 			return errors.New("selected CPA pool requires a CPA channel")
 		}
 		return nil
@@ -51,20 +54,21 @@ func provisionCPAChannel(ctx context.Context, ch *model.Channel, share string) e
 
 func ListCPAChannelBindings(c *gin.Context) {
 	var rows []model.Channel
-	if err := model.DB.WithContext(c.Request.Context()).Select("id", "name", "type", "base_url", "cpa_pool_id").Where("base_url IS NOT NULL AND base_url <> ?", "").Order("id").Find(&rows).Error; err != nil {
+	if err := model.DB.WithContext(c.Request.Context()).Select("id", "name", "type", "base_url", "cpa_pool_id", "cpa_account_pool").Where("base_url IS NOT NULL AND base_url <> ?", "").Order("id").Find(&rows).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
 	type binding struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
-		Pool string `json:"pool"`
+		ID       int    `json:"id"`
+		Name     string `json:"name"`
+		Pool     string `json:"pool"`
+		Category string `json:"category"`
 	}
 	bindings := make([]binding, 0)
 	endpoints := service.CPARelayEndpoints()
 	for _, row := range rows {
 		if slices.Contains(endpoints, service.CPAChannelEndpoint(*row.BaseURL)) {
-			bindings = append(bindings, binding{row.Id, row.Name, row.CPAPoolID})
+			bindings = append(bindings, binding{row.Id, row.Name, row.CPAPoolID, row.CPAAccountCategory()})
 		}
 	}
 	common.ApiSuccess(c, gin.H{"endpoints": endpoints, "channels": bindings})

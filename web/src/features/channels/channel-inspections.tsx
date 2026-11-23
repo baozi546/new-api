@@ -24,6 +24,7 @@ type Settings = {
 }
 type Card = {
   id?: number
+  groups?: string[]
   name?: string
   title: string
   time: number
@@ -47,6 +48,7 @@ const outcomes: Record<string, string> = {
   wrong_answer: 'Answer mismatch',
   rate_limited: 'Rate limited',
   login_required: 'Login required',
+  account_banned: 'Account banned',
   disabled: 'Disabled',
   inconclusive: 'Inconclusive',
 }
@@ -163,6 +165,8 @@ function Editor({
           )}
         </p>
         {draft.questions.map((q, i) => (
+          // These controlled inputs have no row state to retain when the ordered question list changes.
+          // eslint-disable-next-line react/no-array-index-key
           <fieldset key={i} className='grid gap-2 rounded-md border p-3'>
             <legend className='px-1 text-sm'>
               {t('Question')} {i + 1}
@@ -255,7 +259,7 @@ export function ChannelInspections() {
     queryFn: async () => {
       if (manage) return request<Card[]>('GET', '/inspections')
       const { data } = await api.get('/api/channel-inspections')
-      if (!data?.success) throw Error('Request failed')
+      if (!data?.success) throw new Error('Request failed')
       return data.data as Card[]
     },
     refetchInterval: 10000,
@@ -296,17 +300,21 @@ export function ChannelInspections() {
         <div className='grid items-start gap-4 lg:grid-cols-2'>
           {query.data?.map((r, i) => (
             <article key={r.id ?? i} className='bg-card rounded-xl border p-5'>
-              <h2 className='text-lg font-semibold'>
-                {manage ? `#${r.id} ${r.name}` : r.title}
-              </h2>
+              <h2 className='text-lg font-semibold'>{r.title || r.name}</h2>
+              {(manage || (r.name && r.name !== r.title)) && (
+                <p className='text-muted-foreground text-sm'>
+                  {t('Channel')} {manage && `#${r.id} `}
+                  {r.name}
+                </p>
+              )}
+              <p className='mb-2 text-sm'>
+                {t('Bound groups')}{' '}
+                {r.groups?.filter(Boolean).join(' · ') || '—'}
+              </p>
               <p className='text-muted-foreground mb-3 text-sm'>
-                {t(
-                  r.running
-                    ? 'Inspection in progress'
-                    : r.scheduled
-                      ? 'Scheduled checks'
-                      : 'Manual checks'
-                )}
+                {r.running
+                  ? t('Inspection in progress')
+                  : t(r.scheduled ? 'Scheduled checks' : 'Manual checks')}
                 {r.scheduled && ` · ${r.minutes} ${t('minutes')}`}
               </p>
               {r.failed && (

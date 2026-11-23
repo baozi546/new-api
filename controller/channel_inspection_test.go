@@ -36,7 +36,7 @@ func TestChannelInspectionScopesRoundsAndCustomerData(t *testing.T) {
 	defer server.Close()
 	t.Setenv("CPA_MANAGEMENT_URL", server.URL)
 	t.Setenv("CPA_MANAGEMENT_TOKEN", "unit-credential")
-	ch := model.Channel{Id: 17, Type: 1, Name: "private channel name", Key: "example", BaseURL: &server.URL, CPAPoolID: "first"}
+	ch := model.Channel{Id: 17, Type: 1, Name: "CPA Plus", Group: "svip,plus", Key: "example", BaseURL: &server.URL, CPAPoolID: "first"}
 	require.NoError(t, model.DB.Create(&ch).Error)
 	other := model.Channel{Id: 19, Type: 1, Name: "Hidden", Key: "example", BaseURL: &server.URL, CPAPoolID: "second"}
 	require.NoError(t, model.DB.Create(&other).Error)
@@ -55,6 +55,8 @@ func TestChannelInspectionScopesRoundsAndCustomerData(t *testing.T) {
 	public, raw := callChannelAPI(t, CustomerChannelInspections, "GET", "/", "")
 	require.True(t, public.Success)
 	require.Contains(t, raw, "Customer Plus")
+	require.Contains(t, raw, "CPA Plus")
+	require.Contains(t, raw, `"groups":["svip","plus"]`)
 	require.Contains(t, raw, "passed")
 	require.Contains(t, raw, "disabled")
 	for _, bad := range []string{"private", "example.test", "secret expected", "Hidden", "probe-model", "first", "channel_pool_id", "settings"} {

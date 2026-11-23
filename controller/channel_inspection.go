@@ -49,7 +49,11 @@ type inspectionRound struct {
 var inspecting sync.Map
 
 func inspectionKey(c *model.Channel, kind string) string {
-	return fmt.Sprintf("CPAInspection/%d/%s/%s", c.Id, c.CPAPoolID, kind)
+	pool := c.CPAPoolID
+	if kind == "last" {
+		pool += c.CPAAccountPath()
+	}
+	return fmt.Sprintf("CPAInspection/%d/%s/%s", c.Id, pool, kind)
 }
 func readInspection(c *model.Channel, kind string, dst any) {
 	common.OptionMapRWMutex.RLock()
@@ -77,7 +81,7 @@ func (cfg inspectionConfig) valid() bool {
 }
 func inspectionChannels() ([]model.Channel, error) {
 	var all []model.Channel
-	err := model.DB.Select("id", "name", "base_url", "type", "cpa_pool_id").Where("cpa_pool_id <> ?", "").Order("id").Find(&all).Error
+	err := model.DB.Select("id", "name", "base_url", "type", "cpa_pool_id", "cpa_account_pool", "group").Where("cpa_pool_id <> ?", "").Order("id").Find(&all).Error
 	result := all[:0]
 	for _, ch := range all {
 		if matchesCPAChannel(&ch) {
@@ -122,7 +126,7 @@ func listChannelInspections(c *gin.Context, admin bool) {
 			}
 			cards = append(cards, card)
 		}
-		row := gin.H{"title": cfg.Title, "accounts": cards, "time": last.Time, "failed": last.Failed, "running": running, "scheduled": cfg.Scheduled, "minutes": cfg.Minutes}
+		row := gin.H{"name": ch.Name, "groups": strings.Split(ch.Group, ","), "title": cfg.Title, "accounts": cards, "time": last.Time, "failed": last.Failed, "running": running, "scheduled": cfg.Scheduled, "minutes": cfg.Minutes}
 		if admin {
 			row["id"] = ch.Id
 			row["name"] = ch.Name
@@ -205,10 +209,14 @@ func inspectChannel(ch model.Channel, cfg inspectionConfig) error {
 		round.Prompt = q.Prompt
 		round.Model = cfg.Model
 		for _, a := range accounts {
-			if a.ChannelPoolID != ch.CPAPoolID {
+			if a.ChannelPoolID != ch.CPAPoolID || (ch.CPAAccountCategory() != "" && a.Pool != ch.CPAAccountCategory()) {
 				continue
 			}
 			mark := accountMark{ID: a.ID, Label: a.Label, Result: "disabled"}
+			if a.Disabled && (a.Check.Result == "account_banned" || a.Check.Result == "login_required") {
+				mark.Result = a.Check.Result
+				mark.Time = a.Check.Time
+			}
 			if mark.Label == "" {
 				mark.Label = a.ID
 			}
@@ -229,7 +237,7 @@ func inspectChannel(ch model.Channel, cfg inspectionConfig) error {
 				mark.Result = "inconclusive"
 				if err == nil && reply.Check.Question == strings.TrimSpace(q.Prompt) {
 					switch reply.Check.Result {
-					case "passed", "wrong_answer", "rate_limited", "login_required", "inconclusive":
+					case "passed", "wrong_answer", "rate_limited", "login_required", "account_banned", "inconclusive":
 						mark.Result = reply.Check.Result
 					}
 				}

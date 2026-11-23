@@ -1,5 +1,12 @@
 {
   "translation": {
+    "Account banned": "账号已封禁",
+    "Bound groups": "绑定分组",
+    "Route accounts by category": "实际调用账号",
+    "Use all account categories": "全部账号分类",
+    "Channels sharing a pool use the same accounts. Each channel calls only its selected account category.": "共享号池的渠道使用同一批账号，各渠道只调用自己选定分类的账号。",
+    "Invalid CPA account category": "无效的 CPA 账号分类",
+    "CPA account category requires a CPA channel": "请先将渠道的 API 地址设为 CPA 服务地址",
     "Per-account limit for this pool": "本池每账号并发上限",
     "Applies to current and future accounts in the pool. Shared channels use the same limit. Zero means unlimited.": "对池内每个现有和新增账号分别生效。共享此池的渠道共用此值，0 表示不限。",
     "Channel inspections": "渠道巡检",

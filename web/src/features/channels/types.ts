@@ -64,6 +64,8 @@ export type ChannelBalanceResult = z.infer<typeof channelBalanceResultSchema>
 export type ChannelBalanceDetail = z.infer<typeof channelBalanceDetailSchema>
 
 export const channelSchema = z.object({
+  cpa_pool_id: z.string().optional(),
+  cpa_account_pool: z.string().nullish(),
   id: z.number(),
   type: z.number(),
   key: z.string(),

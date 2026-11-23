@@ -215,6 +215,7 @@ import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelQuickOptions } from '../channel-quick-options'
 import { ChannelTypeLogo } from '../channel-type-badge'
 import { useChannels } from '../channels-provider'
+import { CPAPoolFields } from '../cpa-pool-fields'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
 import { ConfigureModelsDialog } from '../dialogs/configure-models-dialog'
 import {
@@ -651,24 +652,21 @@ export function ChannelMutateDrawer({
     : defaultBaseURLs?.[currentType] || t(FIELD_PLACEHOLDERS.BASE_URL)
   const currentStatus = formValues.status
   const currentBaseUrl = formValues.base_url
-  const [sharedCPAPool, setSharedCPAPool] = useState('')
+  const [sharedCPAPool, setSharedCPAPool] = useState<string | undefined>()
+  const [cpaAccountPool, setCPAAccountPool] = useState<string | undefined>()
   const cpaBindings = useCPABindings(
-    !isEditing && open && (currentUser?.role ?? 0) >= ROLE.ADMIN
+    open && (currentUser?.role ?? 0) >= ROLE.ADMIN
   )
-  const creatingCPA =
-    !isEditing &&
+  const defaultCPAPool = isEditing
+    ? channelData?.data?.cpa_pool_id || ''
+    : cpaBindings.data?.channels.find((channel) => channel.pool)?.pool || ''
+  const configuringCPA =
     currentType === 1 &&
     isCPARelayURL(currentBaseUrl || '', cpaBindings.data?.endpoints || [])
-  const availableCPAPools = [
-    ...new Map(
-      (cpaBindings.data?.channels || [])
-        .filter((ch) => ch.pool)
-        .map((ch) => [ch.pool, ch])
-    ).values(),
-  ]
   useEffect(() => {
-    if (!open || !creatingCPA) setSharedCPAPool('')
-  }, [open, creatingCPA])
+    setSharedCPAPool(undefined)
+    setCPAAccountPool(undefined)
+  }, [open, currentRow?.id])
   const currentTaskPluginKey = formValues.task_plugin_key
   const currentTaskExtendPluginKeys = formValues.task_extend_plugin_keys
   const currentKey = formValues.key
@@ -1730,7 +1728,12 @@ export function ChannelMutateDrawer({
   }, [])
 
   const channelMutation = useChannelMutateForm({
-    sharedCPAPool: creatingCPA ? sharedCPAPool : undefined,
+    sharedCPAPool: configuringCPA
+      ? (sharedCPAPool ?? (!isEditing ? defaultCPAPool : undefined))
+      : undefined,
+    cpaAccountPool: configuringCPA
+      ? (cpaAccountPool ?? channelData?.data?.cpa_account_pool ?? '')
+      : undefined,
     currentRow,
     isEditing,
     isMultiKeyChannel,
@@ -3760,23 +3763,17 @@ export function ChannelMutateDrawer({
   const connectionSection = (
     <div className='scroll-mt-4'>
       <ChannelApiAccessSection>
-        {creatingCPA && (
-          <label className='flex flex-wrap items-center gap-2 text-sm'>
-            {t('CPA channel pool')}
-            <select
-              className='bg-background rounded-md border p-1'
-              value={sharedCPAPool}
-              onChange={(e) => setSharedCPAPool(e.target.value)}
-            >
-              <option value=''>{t('Create a dedicated pool')}</option>
-              {availableCPAPools.map((ch) => (
-                <option key={ch.pool} value={ch.pool}>
-                  {t('Share pool with {{channel}}', { channel: ch.name })} (#
-                  {ch.id})
-                </option>
-              ))}
-            </select>
-          </label>
+        {configuringCPA && (
+          <CPAPoolFields
+            pools={cpaBindings.data?.channels || []}
+            pool={sharedCPAPool ?? defaultCPAPool}
+            category={
+              cpaAccountPool ?? channelData?.data?.cpa_account_pool ?? ''
+            }
+            disabled={!canEditSensitive || isSubmitting}
+            onPoolChange={setSharedCPAPool}
+            onCategoryChange={setCPAAccountPool}
+          />
         )}
         {CHANNEL_TYPE_WARNINGS[currentType] && (
           <Alert>

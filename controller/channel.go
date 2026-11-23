@@ -1205,6 +1205,7 @@ func DeleteChannelBatch(c *gin.Context) {
 
 type PatchChannel struct {
 	model.Channel
+	ShareCPAPool *string `json:"share_cpa_pool"`
 	MultiKeyMode *string `json:"multi_key_mode"`
 	KeyMode      *string `json:"key_mode"` // 多key模式下密钥覆盖或者追加
 }
@@ -1268,6 +1269,19 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	channel.CPAPoolID = originChannel.CPAPoolID
+	if _, provided := requestData["cpa_account_pool"]; !provided || channel.CPAAccountPool == nil {
+		channel.CPAAccountPool = originChannel.CPAAccountPool
+	}
+	category := channel.CPAAccountCategory()
+	if category != "" && category != "plus" && category != "pro" && category != "degraded" && category != "unassigned" {
+		common.ApiErrorT(c, "Invalid CPA account category")
+		return
+	}
+	if category != "" && !matchesCPAChannel(originChannel) {
+		common.ApiErrorT(c, "CPA account category requires a CPA channel")
+		return
+	}
+
 	proxyChanged := false
 	_, settingProvided := requestData["setting"]
 	if settingProvided {
@@ -1295,6 +1309,15 @@ func UpdateChannel(c *gin.Context) {
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
 		common.ApiErrorT(c, "Unauthorized, insufficient privileges")
 		return
+	}
+	if channel.ShareCPAPool != nil {
+		target := *originChannel
+		target.CPAAccountPool = channel.CPAAccountPool
+		if err := provisionCPAChannel(c.Request.Context(), &target, *channel.ShareCPAPool); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		channel.CPAPoolID = target.CPAPoolID
 	}
 
 	// If the request explicitly specifies a new MultiKeyMode, apply it on top of the original info.
@@ -1872,7 +1895,7 @@ func CopyChannel(c *gin.Context) {
 	}
 
 	// insert
-	if err := provisionCPAChannel(c.Request.Context(), &clone, ""); err != nil {
+	if err := provisionCPAChannel(c.Request.Context(), &clone, origin.CPAPoolID); err != nil {
 		common.ApiError(c, err)
 		return
 	}

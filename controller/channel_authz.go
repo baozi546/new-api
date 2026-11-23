@@ -3,6 +3,12 @@ package controller
 import "github.com/QuantumNous/new-api/model"
 
 func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, requestData map[string]any) bool {
+	if _, ok := requestData["cpa_account_pool"]; ok && !equalStringPtr(channel.CPAAccountPool, origin.CPAAccountPool) {
+		return true
+	}
+	if channel.ShareCPAPool != nil && (*channel.ShareCPAPool == "" || *channel.ShareCPAPool != origin.CPAPoolID) {
+		return true
+	}
 	if _, ok := requestData["type"]; ok && channel.Type != origin.Type {
 		return true
 	}
@@ -61,6 +67,8 @@ func channelHasSensitiveChanges(channel *PatchChannel, origin *model.Channel, re
 // channelHasSensitiveChanges with a precise old-vs-new comparison; this set is
 // used to exclude them from the fail-closed scan for unknown fields.
 var channelSensitiveFields = map[string]struct{}{
+	"share_cpa_pool":      {},
+	"cpa_account_pool":    {},
 	"type":                {},
 	"key":                 {},
 	"base_url":            {},
@@ -82,6 +90,7 @@ var channelOperationalFields = map[string]struct{}{
 // channelReadOnlyFields lists server-managed/accounting fields that the general
 // channel edit endpoint must ignore even if a client sends them.
 var channelReadOnlyFields = map[string]struct{}{
+	"cpa_pool_id":          {},
 	"created_time":         {},
 	"test_time":            {},
 	"response_time":        {},

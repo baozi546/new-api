@@ -1,5 +1,12 @@
 {
   "translation": {
+    "Account banned": "Account banned",
+    "Bound groups": "Bound groups",
+    "Route accounts by category": "Route accounts by category",
+    "Use all account categories": "Use all account categories",
+    "Channels sharing a pool use the same accounts. Each channel calls only its selected account category.": "Channels sharing a pool use the same accounts. Each channel calls only its selected account category.",
+    "Invalid CPA account category": "Invalid CPA account category",
+    "CPA account category requires a CPA channel": "CPA account category requires a CPA channel",
     "Per-account limit for this pool": "Лимит на аккаунт пула",
     "Applies to current and future accounts in the pool. Shared channels use the same limit. Zero means unlimited.": "Лимит действует для каждого текущего и нового аккаунта пула, в том числе в общих каналах. Ноль снимает ограничение.",
     "Channel inspections": "Проверки каналов",

@@ -26,7 +26,8 @@ import (
 )
 
 type Channel struct {
-	CPAPoolID          string  `json:"cpa_pool_id,omitempty" gorm:"column:cpa_pool_id;size:32;<-:create;index"`
+	CPAAccountPool     *string `json:"cpa_account_pool" gorm:"column:cpa_account_pool;size:16"`
+	CPAPoolID          string  `json:"cpa_pool_id,omitempty" gorm:"column:cpa_pool_id;size:32;index"`
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
 	Key                string  `json:"key" gorm:"not null"`
@@ -581,13 +582,26 @@ func (channel *Channel) GetWeight() int {
 	return int(*channel.Weight)
 }
 
+func (channel *Channel) CPAAccountCategory() string {
+	if channel.CPAAccountPool == nil {
+		return ""
+	}
+	return *channel.CPAAccountPool
+}
+func (channel *Channel) CPAAccountPath() string {
+	if category := channel.CPAAccountCategory(); category != "" {
+		return "/categories/" + category
+	}
+	return ""
+}
+
 func (channel *Channel) GetBaseURL() string {
 	if channel.BaseURL == nil {
 		return ""
 	}
 	url := *channel.BaseURL
 	if channel.CPAPoolID != "" {
-		return strings.TrimSuffix(strings.TrimRight(url, "/"), "/v1") + "/channel-pools/" + channel.CPAPoolID
+		return strings.TrimSuffix(strings.TrimRight(url, "/"), "/v1") + "/channel-pools/" + channel.CPAPoolID + channel.CPAAccountPath()
 	}
 	if url == "" {
 		url = constant.GetChannelBaseURL(channel.Type)

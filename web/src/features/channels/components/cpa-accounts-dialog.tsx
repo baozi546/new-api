@@ -50,6 +50,7 @@ const results: Record<string, string> = {
   inconclusive: 'Inconclusive',
   rate_limited: 'Rate limited',
   login_required: 'Login required',
+  account_banned: 'Account banned',
 }
 function issuesOf(a: Account): string[] {
   const issues: string[] = []
@@ -126,7 +127,9 @@ export function CPAChannelPoolStatus({ id }: { id: number }) {
   const binding = pool?.channels.find((ch) => ch.id === id)
   if (!pool || !binding) return null
   const members = pool.accounts?.filter(
-    (a) => (a.channel_pool_id || '') === binding.pool
+    (a) =>
+      (a.channel_pool_id || '') === binding.pool &&
+      (!binding.category || a.account_pool === binding.category)
   )
   const shared = pool.channels.some(
     (ch) => ch.id !== id && ch.pool === binding.pool
@@ -150,6 +153,8 @@ export function CPAChannelPoolStatus({ id }: { id: number }) {
       onClick={() => pool.show(binding)}
     >
       {shared && `${t('Shared CPA pool')} · `}
+      {binding.category &&
+        `${t(pools[binding.category] || binding.category)} · `}
       {counts}
     </Button>
   )
@@ -344,9 +349,9 @@ export function CPAAccountsDialog({
   const cache = useQueryClient()
   const [open, setOpen] = useState(!!binding || problemsOnly)
   const [issues, setIssues] = useState(problemsOnly)
-  const [pool, setPool] = useState('')
+  const [pool, setPool] = useState(binding?.category || '')
   const [login, setLogin] = useState<Login | null>(null)
-  const [targetPool, setTargetPool] = useState('')
+  const [targetPool, setTargetPool] = useState(binding?.category || '')
   const [callback, setCallback] = useState('')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
