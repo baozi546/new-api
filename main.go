@@ -115,6 +115,9 @@ func main() {
 	// The first plugin sync finishes before the server accepts requests, so no
 	// request runs without the uploaded plugins.
 	controller.SyncTaskPluginsOnce()
+	if common.IsMasterNode {
+		service.StartCPAAccountChecks()
+	}
 
 	// Every node reloads a topic within seconds of a write to it on any node.
 	// The periodic reloads below stay for writes that do not bump a topic.

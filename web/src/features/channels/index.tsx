@@ -34,6 +34,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { getChannelOps } from './api'
 import { ChannelsDialogs } from './components/channels-dialogs'
+import { CPAAccountsDialog } from './components/cpa-accounts-dialog'
 import { ChannelsPrimaryButtons } from './components/channels-primary-buttons'
 import { ChannelsProvider } from './components/channels-provider'
 import { ChannelsTable } from './components/channels-table'
@@ -95,6 +96,7 @@ export function Channels() {
           </span>
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
+          {isRoot && <CPAAccountsDialog />}
           <ChannelsPrimaryButtons />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
