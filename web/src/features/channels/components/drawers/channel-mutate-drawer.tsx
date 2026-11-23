@@ -201,6 +201,7 @@ import {
   supportsNewAPIUpstream,
 } from '../../lib/channel-plugin-extensions'
 import { getChannelTypeConfig } from '../../lib/channel-type-config'
+import { isCPARelayURL, useCPABindings } from '../../lib/cpa-channel-pools'
 import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
@@ -650,6 +651,24 @@ export function ChannelMutateDrawer({
     : defaultBaseURLs?.[currentType] || t(FIELD_PLACEHOLDERS.BASE_URL)
   const currentStatus = formValues.status
   const currentBaseUrl = formValues.base_url
+  const [sharedCPAPool, setSharedCPAPool] = useState('')
+  const cpaBindings = useCPABindings(
+    !isEditing && open && currentUser?.role === ROLE.SUPER_ADMIN
+  )
+  const creatingCPA =
+    !isEditing &&
+    currentType === 1 &&
+    isCPARelayURL(currentBaseUrl || '', cpaBindings.data?.endpoints || [])
+  const availableCPAPools = [
+    ...new Map(
+      (cpaBindings.data?.channels || [])
+        .filter((ch) => ch.pool)
+        .map((ch) => [ch.pool, ch])
+    ).values(),
+  ]
+  useEffect(() => {
+    if (!open || !creatingCPA) setSharedCPAPool('')
+  }, [open, creatingCPA])
   const currentTaskPluginKey = formValues.task_plugin_key
   const currentTaskExtendPluginKeys = formValues.task_extend_plugin_keys
   const currentKey = formValues.key
@@ -1711,6 +1730,7 @@ export function ChannelMutateDrawer({
   }, [])
 
   const channelMutation = useChannelMutateForm({
+    sharedCPAPool: creatingCPA ? sharedCPAPool : undefined,
     currentRow,
     isEditing,
     isMultiKeyChannel,
@@ -1863,6 +1883,11 @@ export function ChannelMutateDrawer({
 
       try {
         const result = await channelMutation.mutateAsync(data)
+        if (!isEditing) {
+          void queryClient.invalidateQueries({
+            queryKey: ['cpa-channel-bindings'],
+          })
+        }
         if (!isEditing && loginPlugin && result.channelId) {
           setLoginRequest({
             channelId: result.channelId,
@@ -1887,6 +1912,7 @@ export function ChannelMutateDrawer({
       confirmMissingModelMappings,
       confirmStatusCodeRisk,
       channelMutation,
+      queryClient,
       t,
     ]
   )
@@ -3734,6 +3760,24 @@ export function ChannelMutateDrawer({
   const connectionSection = (
     <div className='scroll-mt-4'>
       <ChannelApiAccessSection>
+        {creatingCPA && (
+          <label className='flex flex-wrap items-center gap-2 text-sm'>
+            {t('CPA channel pool')}
+            <select
+              className='bg-background rounded-md border p-1'
+              value={sharedCPAPool}
+              onChange={(e) => setSharedCPAPool(e.target.value)}
+            >
+              <option value=''>{t('Create a dedicated pool')}</option>
+              {availableCPAPools.map((ch) => (
+                <option key={ch.pool} value={ch.pool}>
+                  {t('Share pool with {{channel}}', { channel: ch.name })} (#
+                  {ch.id})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {CHANNEL_TYPE_WARNINGS[currentType] && (
           <Alert>
             <AlertDescription>

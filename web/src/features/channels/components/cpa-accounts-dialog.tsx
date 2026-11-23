@@ -12,10 +12,12 @@ import { useTranslation } from 'react-i18next'
 import { Dialog } from '@/components/dialog'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { api } from '@/lib/api'
 import { formatTimestampToDate } from '@/lib/format'
 
+import { request, useCPABindings, type Binding } from '../lib/cpa-channel-pools'
+
 type Account = {
+  channel_pool_id?: string
   id: string
   label: string
   disabled: boolean
@@ -34,7 +36,6 @@ type Account = {
   }
 }
 type Login = { flow: string; url: string }
-const route = '/api/cpa/accounts'
 const pools: Record<string, string> = {
   unassigned: 'Unassigned',
   plus: 'Plus',
@@ -69,28 +70,12 @@ function issuesOf(a: Account): string[] {
 }
 const problem = (a: Account) => issuesOf(a).length > 0
 
-async function request<T>(
-  method: 'GET' | 'PATCH' | 'POST',
-  path = '',
-  data?: unknown
-): Promise<T> {
-  const r = await api.request({ method, url: route + path, data })
-  if (!r.data?.success) {
-    throw new Error(
-      typeof r.data?.message === 'string' ? r.data.message : 'Request failed'
-    )
-  }
-  return r.data.data as T
-}
-
 const PoolContext = createContext<{
-  ids: number[]
-  count?: number
-  total?: number
+  channels: Binding[]
+  accounts?: Account[]
   failed: boolean
-  show: () => void
+  show: (binding: Binding) => void
 } | null>(null)
-
 export function CPAChannelPoolProvider({
   enabled,
   children,
@@ -98,18 +83,12 @@ export function CPAChannelPoolProvider({
   enabled: boolean
   children: ReactNode
 }) {
-  const [open, setOpen] = useState(false)
-  const channels = useQuery({
-    queryKey: ['cpa-channel-ids'],
-    queryFn: () => request<number[]>('GET', '/channels'),
-    enabled,
-    staleTime: 30000,
-    refetchInterval: 30000,
-  })
+  const [selected, setSelected] = useState<Binding | null>(null)
+  const channels = useCPABindings(enabled)
   const accounts = useQuery({
     queryKey: ['cpa-accounts'],
     queryFn: () => request<Account[]>('GET'),
-    enabled: enabled && !!channels.data?.length,
+    enabled: enabled && !!channels.data?.channels.length,
     staleTime: 30000,
     refetchInterval: 30000,
     retry: false,
@@ -118,11 +97,10 @@ export function CPAChannelPoolProvider({
     () =>
       enabled && channels.data
         ? {
-            ids: channels.data,
-            count: accounts.data?.filter(problem).length,
-            total: accounts.data?.length,
+            channels: channels.data.channels,
+            accounts: accounts.data,
             failed: accounts.isError || channels.isError,
-            show: () => setOpen(true),
+            show: setSelected,
           }
         : null,
     [enabled, channels.data, channels.isError, accounts.data, accounts.isError]
@@ -130,23 +108,36 @@ export function CPAChannelPoolProvider({
   return (
     <PoolContext.Provider value={value}>
       {children}
-      {enabled && open && (
-        <CPAAccountsDialog problemsOnly onClose={() => setOpen(false)} />
+      {enabled && selected && (
+        <CPAAccountsDialog
+          binding={selected}
+          problemsOnly={!selected.pool}
+          onClose={() => setSelected(null)}
+        />
       )}
     </PoolContext.Provider>
   )
 }
-
 export function CPAChannelPoolStatus({ id }: { id: number }) {
   const pool = useContext(PoolContext)
   const { t } = useTranslation()
-  if (!pool?.ids.includes(id)) return null
+  const binding = pool?.channels.find((ch) => ch.id === id)
+  if (!pool || !binding) return null
+  const members = pool.accounts?.filter(
+    (a) => (a.channel_pool_id || '') === binding.pool
+  )
+  const shared = pool.channels.some(
+    (ch) => ch.id !== id && ch.pool === binding.pool
+  )
   let counts = t('Loading...')
-  if (pool.failed) counts = t('Account status unavailable')
-  else if (pool.total !== undefined) {
+  if (pool.failed) {
+    counts = t('Account status unavailable')
+  } else if (members && binding.pool && members.length === 0) {
+    counts = t('No accounts · Add account')
+  } else if (members) {
     counts = t('{{issues}} of {{total}} accounts need attention', {
-      issues: pool.count,
-      total: pool.total,
+      issues: members.filter(problem).length,
+      total: members.length,
     })
   }
   return (
@@ -154,14 +145,13 @@ export function CPAChannelPoolStatus({ id }: { id: number }) {
       size='sm'
       variant='link'
       className='h-auto self-start px-0 text-xs whitespace-normal'
-      onClick={pool.show}
+      onClick={() => pool.show(binding)}
     >
-      {pool.ids.length > 1 && `${t('Shared CPA pool')} · `}
+      {shared && `${t('Shared CPA pool')} · `}
       {counts}
     </Button>
   )
 }
-
 function AccountRow({
   account,
   onChange,
@@ -270,12 +260,13 @@ function AccountRow({
 }
 
 export function CPAAccountsDialog({
+  binding,
   problemsOnly = false,
   onClose,
-}: { problemsOnly?: boolean; onClose?: () => void } = {}) {
+}: { binding?: Binding; problemsOnly?: boolean; onClose?: () => void } = {}) {
   const { t } = useTranslation()
   const cache = useQueryClient()
-  const [open, setOpen] = useState(problemsOnly)
+  const [open, setOpen] = useState(!!binding || problemsOnly)
   const [issues, setIssues] = useState(problemsOnly)
   const [pool, setPool] = useState('')
   const [login, setLogin] = useState<Login | null>(null)
@@ -299,11 +290,10 @@ export function CPAAccountsDialog({
     try {
       if (!login) {
         setLogin(
-          await request<Login>(
-            'POST',
-            '/login',
-            targetPool ? { pool: targetPool } : {}
-          )
+          await request<Login>('POST', '/login', {
+            ...(targetPool ? { pool: targetPool } : {}),
+            ...(binding?.pool ? { channel_id: binding.id } : {}),
+          })
         )
         return
       }
@@ -317,6 +307,10 @@ export function CPAAccountsDialog({
         return
       }
       setLogin(null)
+      if (status.status === 'pool_conflict') {
+        setMessage(t('Account already belongs to another channel pool'))
+        return
+      }
       setMessage(
         t(
           status.status === 'ok' ? 'Account authorized' : 'Authorization failed'
@@ -330,11 +324,14 @@ export function CPAAccountsDialog({
     }
   }
   const rows = (query.data ?? []).filter(
-    (a) => (!issues || problem(a)) && (!pool || a.account_pool === pool)
+    (a) =>
+      (!binding || (a.channel_pool_id || '') === binding.pool) &&
+      (!issues || problem(a)) &&
+      (!pool || a.account_pool === pool)
   )
   return (
     <>
-      {!problemsOnly && (
+      {!binding && !problemsOnly && (
         <Button variant='outline' onClick={() => setOpen(true)}>
           <KeyRound />
           {t('CPA accounts')}
@@ -351,7 +348,11 @@ export function CPAAccountsDialog({
             onClose?.()
           }
         }}
-        title={t(problemsOnly ? 'Problem accounts' : 'CPA accounts')}
+        title={
+          binding
+            ? `${binding.name} · ${t('CPA accounts')}`
+            : t(problemsOnly ? 'Problem accounts' : 'CPA accounts')
+        }
         contentClassName='sm:max-w-5xl'
         bodyClassName='space-y-4'
       >
@@ -388,7 +389,7 @@ export function CPAAccountsDialog({
         {!problemsOnly && (
           <div className='flex flex-wrap items-center gap-2'>
             <label className='flex items-center gap-2'>
-              {t('Add account to pool')}
+              {t(binding ? 'Subscription label' : 'Add account to pool')}
               <select
                 className='bg-background rounded-md border p-1'
                 value={targetPool}

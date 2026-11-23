@@ -774,6 +774,7 @@ func RefreshCodexChannelCredential(c *gin.Context) {
 }
 
 type AddChannelRequest struct {
+	ShareCPAPool              string                `json:"share_cpa_pool"`
 	Mode                      string                `json:"mode"`
 	MultiKeyMode              constant.MultiKeyMode `json:"multi_key_mode"`
 	BatchAddSetKeyPrefix2Name bool                  `json:"batch_add_set_key_prefix_2_name"`
@@ -934,6 +935,12 @@ func AddChannel(c *gin.Context) {
 		service.PluginLoginNeededStatus(addChannelRequest.Channel)
 		channels = append(channels, *addChannelRequest.Channel)
 		channelInputIndices = append(channelInputIndices, nil)
+	}
+	for i := range channels {
+		if err := provisionCPAChannel(c.Request.Context(), &channels[i], addChannelRequest.ShareCPAPool); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 	}
 	err = model.BatchInsertChannels(channels)
 	if err != nil {
@@ -1256,6 +1263,11 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	originProxy := originChannel.GetSetting().Proxy
+	if originChannel.CPAPoolID != "" && ((channel.BaseURL != nil && !matchesCPAChannel(&model.Channel{Type: originChannel.Type, BaseURL: channel.BaseURL})) || (channel.Type != 0 && channel.Type != originChannel.Type)) {
+		common.ApiErrorT(c, "Changing the endpoint of a bound CPA channel is not supported")
+		return
+	}
+	channel.CPAPoolID = originChannel.CPAPoolID
 	proxyChanged := false
 	_, settingProvided := requestData["setting"]
 	if settingProvided {
@@ -1860,6 +1872,10 @@ func CopyChannel(c *gin.Context) {
 	}
 
 	// insert
+	if err := provisionCPAChannel(c.Request.Context(), &clone, ""); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	if err := clone.Insert(); err != nil {
 		common.SysError(common.LogText("failed to clone channel: %s", err.Error()))
 		common.ApiErrorT(c, "Failed to copy channel. Please try again later")

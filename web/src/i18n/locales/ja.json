@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Subscription label": "契約プランの分類",
+    "CPA channel pool": "チャネルのアカウントプール",
+    "Create a dedicated pool": "専用プールを作成",
+    "Share pool with {{channel}}": "{{channel}} とプールを共有",
+    "No accounts · Add account": "アカウントなし · 追加",
+    "Account already belongs to another channel pool": "このアカウントは別のチャネルのプールに属しています",
     "Add account to pool": "追加先のアカウントプール",
     "Detect from subscription": "サブスクリプションから判定",
     "Selecting a pool at sign-in requires the matching CPA build": "ログイン時のプール選択には対応する CPA バージョンが必要です",

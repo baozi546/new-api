@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Subscription label": "Nhãn gói đăng ký",
+    "CPA channel pool": "Nhóm tài khoản của kênh",
+    "Create a dedicated pool": "Tạo nhóm riêng",
+    "Share pool with {{channel}}": "Dùng chung nhóm với {{channel}}",
+    "No accounts · Add account": "Chưa có tài khoản · Thêm",
+    "Account already belongs to another channel pool": "Tài khoản đã thuộc nhóm của kênh khác",
     "Add account to pool": "Thêm tài khoản vào nhóm",
     "Detect from subscription": "Nhận diện theo gói đăng ký",
     "Selecting a pool at sign-in requires the matching CPA build": "Cần phiên bản CPA tương thích để chọn nhóm khi đăng nhập",

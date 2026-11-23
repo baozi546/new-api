@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Subscription label": "訂閱分類",
+    "CPA channel pool": "渠道帳號池",
+    "Create a dedicated pool": "建立專屬帳號池",
+    "Share pool with {{channel}}": "與 {{channel}} 共用帳號池",
+    "No accounts · Add account": "尚無帳號 · 新增帳號",
+    "Account already belongs to another channel pool": "此帳號已屬於其他渠道帳號池",
     "Add account to pool": "加入帳號池",
     "Detect from subscription": "依訂閱識別",
     "Selecting a pool at sign-in requires the matching CPA build": "請升級配套 CPA 版本後再於授權時選擇帳號池",

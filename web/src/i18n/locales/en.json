@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Subscription label": "Subscription label",
+    "CPA channel pool": "CPA channel pool",
+    "Create a dedicated pool": "Create a dedicated pool",
+    "Share pool with {{channel}}": "Share pool with {{channel}}",
+    "No accounts · Add account": "No accounts · Add account",
+    "Account already belongs to another channel pool": "Account already belongs to another channel pool",
     "Add account to pool": "Add account to pool",
     "Detect from subscription": "Detect from subscription",
     "Selecting a pool at sign-in requires the matching CPA build": "Selecting a pool at sign-in requires the matching CPA build",

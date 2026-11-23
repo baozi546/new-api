@@ -39,6 +39,7 @@ import {
 import type { Channel } from '../types'
 
 type UseChannelMutateFormParams = {
+  sharedCPAPool?: string
   currentRow?: Channel | null
   isEditing: boolean
   isMultiKeyChannel: boolean
@@ -107,7 +108,11 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
       }
 
       const payload = transformFormDataToCreatePayload(data)
-      const response = await createChannel(payload)
+      const createPayload = {
+        ...payload,
+        ...(props.sharedCPAPool ? { share_cpa_pool: props.sharedCPAPool } : {}),
+      }
+      const response = await createChannel(createPayload)
       if (!response.success) {
         throw createServerError(response, t(ERROR_MESSAGES.CREATE_FAILED))
       }

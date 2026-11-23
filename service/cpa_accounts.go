@@ -26,6 +26,7 @@ type CPACheck struct {
 // Decode only the fields needed by the console. CPA's full response can contain
 // provider metadata, private paths and OAuth identity claims.
 type CPAAccount struct {
+	ChannelPoolID string   `json:"channel_pool_id,omitempty"`
 	ID            string   `json:"id"`
 	Provider      string   `json:"provider"`
 	Label         string   `json:"label"`
@@ -55,6 +56,20 @@ func CPAChannelEndpoint(raw string) string {
 }
 
 var cpaManagementHTTP = &http.Client{Timeout: 90 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+
+func CPARelayEndpoints() []string {
+	base := CPAChannelEndpoint(os.Getenv("CPA_MANAGEMENT_URL"))
+	if base == "" {
+		return []string{}
+	}
+	urls := []string{base}
+	for _, alias := range strings.Split(os.Getenv("CPA_RELAY_URLS"), ",") {
+		if key := CPAChannelEndpoint(alias); key != "" {
+			urls = append(urls, key)
+		}
+	}
+	return urls
+}
 
 func CallCPAManagement(ctx context.Context, method, path string, input, output any) error {
 	base := strings.TrimRight(os.Getenv("CPA_MANAGEMENT_URL"), "/")

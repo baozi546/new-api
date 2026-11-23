@@ -26,6 +26,7 @@ import (
 )
 
 type Channel struct {
+	CPAPoolID          string  `json:"cpa_pool_id,omitempty" gorm:"column:cpa_pool_id;size:32;<-:create;index"`
 	Id                 int     `json:"id"`
 	Type               int     `json:"type" gorm:"default:0"`
 	Key                string  `json:"key" gorm:"not null"`
@@ -585,6 +586,9 @@ func (channel *Channel) GetBaseURL() string {
 		return ""
 	}
 	url := *channel.BaseURL
+	if channel.CPAPoolID != "" {
+		return strings.TrimSuffix(strings.TrimRight(url, "/"), "/v1") + "/channel-pools/" + channel.CPAPoolID
+	}
 	if url == "" {
 		url = constant.GetChannelBaseURL(channel.Type)
 	}

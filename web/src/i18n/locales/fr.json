@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Subscription label": "Catégorie du forfait",
+    "CPA channel pool": "Groupe de comptes du canal",
+    "Create a dedicated pool": "Créer un groupe dédié",
+    "Share pool with {{channel}}": "Partager le groupe de {{channel}}",
+    "No accounts · Add account": "Aucun compte · Ajouter",
+    "Account already belongs to another channel pool": "Ce compte appartient déjà à un autre canal",
     "Add account to pool": "Ajouter le compte au groupe",
     "Detect from subscription": "Détecter selon le forfait",
     "Selecting a pool at sign-in requires the matching CPA build": "La sélection du groupe à la connexion nécessite la version CPA compatible",

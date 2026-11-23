@@ -1,5 +1,11 @@
 {
   "translation": {
+    "Subscription label": "Категория подписки",
+    "CPA channel pool": "Пул канала",
+    "Create a dedicated pool": "Создать отдельный пул",
+    "Share pool with {{channel}}": "Общий пул с {{channel}}",
+    "No accounts · Add account": "Нет аккаунтов · Добавить",
+    "Account already belongs to another channel pool": "Аккаунт уже принадлежит другому пулу",
     "Add account to pool": "Добавить аккаунт в пул",
     "Detect from subscription": "Определить по подписке",
     "Selecting a pool at sign-in requires the matching CPA build": "Для выбора пула при входе требуется совместимая версия CPA",

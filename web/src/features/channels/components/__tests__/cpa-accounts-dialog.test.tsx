@@ -124,7 +124,16 @@ test('shared channels display the same issue count and open affected accounts', 
     .mockImplementation(async (options) => ({
       data: {
         success: true,
-        data: options.url?.endsWith('/channels') ? [7, 8] : accounts,
+        data: options.url?.endsWith('/bindings')
+          ? {
+              endpoints: [],
+              channels: [7, 8].map((id) => ({
+                id,
+                name: `Channel ${id}`,
+                pool: '',
+              })),
+            }
+          : accounts,
       },
     }))
   const client = new QueryClient({
@@ -153,6 +162,49 @@ test('shared channels display the same issue count and open affected accounts', 
     expect(
       request.mock.calls.every(([options]) => options.method === 'GET')
     ).toBe(true)
+  } finally {
+    view.unmount()
+    client.clear()
+    request.mockRestore()
+  }
+})
+
+test('an empty channel opens account sign-in bound to its own pool', async () => {
+  const request = vi
+    .spyOn(api, 'request')
+    .mockImplementation(async (options) => {
+      let data: unknown = { flow: 's', url: 'https://auth.example.test/login' }
+      if (options.url?.endsWith('/bindings')) {
+        data = {
+          endpoints: [],
+          channels: [{ id: 7, name: 'Pro', pool: 'first' }],
+        }
+      } else if (options.method === 'GET') {
+        data = [{ id: 'other', channel_pool_id: 'second', account_check: {} }]
+      }
+      return { data: { success: true, data } }
+    })
+  const client = new QueryClient()
+  const view = render(
+    <QueryClientProvider client={client}>
+      <CPAChannelPoolProvider enabled>
+        <CPAChannelPoolStatus id={7} />
+      </CPAChannelPoolProvider>
+    </QueryClientProvider>
+  )
+  try {
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'No accounts · Add account' })
+    )
+    await screen.findByRole('dialog', { name: /Pro/ })
+    expect(screen.queryByRole('row', { name: /other/ })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Authorize account' }))
+    await screen.findByRole('link', { name: 'Open sign-in page' })
+    expect(request).toHaveBeenCalledWith({
+      method: 'POST',
+      url: '/api/cpa/accounts/login',
+      data: { channel_id: 7 },
+    })
   } finally {
     view.unmount()
     client.clear()

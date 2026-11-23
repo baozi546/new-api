@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/model"
@@ -91,4 +92,63 @@ func TestCPAChannelIDsMatchOnlyConfiguredRelayEndpoints(t *testing.T) {
 	response, raw := callChannelAPI(t, ListCPAChannelIDs, "GET", "/api/cpa/accounts/channels", "")
 	require.True(t, response.Success, raw)
 	require.JSONEq(t, `[1,2]`, string(response.Data))
+}
+
+func TestCPAChannelCreateShareRenameAndLogin(t *testing.T) {
+	setupTaskPluginBindChannelTest(t)
+	require.NoError(t, model.DB.AutoMigrate(&model.AuthFlow{}))
+	loginPool := ""
+	available := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !available {
+			w.WriteHeader(503)
+			return
+		}
+		if r.Method == "PUT" {
+			id := strings.TrimPrefix(r.URL.Path, "/v8/management/channel-pools/")
+			fmt.Fprintf(w, `{"id":%q}`, id)
+			return
+		}
+		if r.URL.Path == "/v8/management/oauth/auth-url" {
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			loginPool = body["channel_pool_id"]
+			fmt.Fprintf(w, `{"state":"s1","url":"https://auth.openai.com/a?state=s1","channel_pool_id":%q}`, loginPool)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	t.Setenv("CPA_MANAGEMENT_URL", server.URL)
+	t.Setenv("CPA_MANAGEMENT_TOKEN", "fixture")
+	create := func(share string) channelAPIResponse {
+		body := fmt.Sprintf(`{"mode":"single","share_cpa_pool":%q,"channel":{"name":"same","type":1,"key":"fixture","base_url":%q,"models":"test","group":"default"}}`, share, server.URL)
+		res, _ := callChannelAPI(t, AddChannel, "POST", "/api/channel", body)
+		return res
+	}
+	require.True(t, create("").Success)
+	require.True(t, create("").Success)
+	a, err := model.GetChannelById(1, true)
+	require.NoError(t, err)
+	b, err := model.GetChannelById(2, true)
+	require.NoError(t, err)
+	require.Len(t, a.CPAPoolID, 32)
+	require.NotEqual(t, a.CPAPoolID, b.CPAPoolID)
+	require.Equal(t, server.URL+"/channel-pools/"+a.CPAPoolID, a.GetBaseURL())
+	require.True(t, create(a.CPAPoolID).Success)
+	shared, err := model.GetChannelById(3, true)
+	require.NoError(t, err)
+	require.Equal(t, a.CPAPoolID, shared.CPAPoolID)
+	require.NoError(t, model.DB.Model(a).Update("name", "renamed").Error)
+	res, raw := callChannelAPI(t, CPAAccountLogin, "POST", "/login", `{"channel_id":1}`)
+	require.True(t, res.Success, raw)
+	require.Equal(t, a.CPAPoolID, loginPool)
+	require.False(t, create("invalid").Success)
+	available = false
+	require.False(t, create("").Success)
+	var count int64
+	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
+	require.EqualValues(t, 3, count)
 }

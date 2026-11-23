@@ -117,9 +117,10 @@ func CPAAccountLogin(c *gin.Context) {
 		return
 	}
 	var input struct {
-		Flow     string `json:"flow"`
-		Callback string `json:"callback"`
-		Pool     string `json:"pool"`
+		Flow      string `json:"flow"`
+		Callback  string `json:"callback"`
+		ChannelID int    `json:"channel_id"`
+		Pool      string `json:"pool"`
 	}
 	if c.ShouldBindJSON(&input) != nil {
 		common.ApiErrorT(c, "Invalid parameters")
@@ -133,6 +134,14 @@ func CPAAccountLogin(c *gin.Context) {
 			return
 		}
 		body := map[string]string{"provider": "codex"}
+		if input.ChannelID != 0 {
+			ch, err := model.GetChannelById(input.ChannelID, false)
+			if err != nil || ch.CPAPoolID == "" || !matchesCPAChannel(ch) {
+				common.ApiErrorT(c, "Invalid parameters")
+				return
+			}
+			body["channel_pool_id"] = ch.CPAPoolID
+		}
 		if input.Pool != "" {
 			switch input.Pool {
 			case "unassigned", "plus", "pro", "degraded":
@@ -143,15 +152,16 @@ func CPAAccountLogin(c *gin.Context) {
 			}
 		}
 		var start struct {
-			URL   string `json:"url"`
-			State string `json:"state"`
-			Pool  string `json:"account_pool"`
+			URL         string `json:"url"`
+			State       string `json:"state"`
+			Pool        string `json:"account_pool"`
+			ChannelPool string `json:"channel_pool_id"`
 		}
 		if err := service.CallCPAManagement(ctx, "POST", "oauth/auth-url", body, &start); err != nil {
 			common.ApiError(c, err)
 			return
 		}
-		if input.Pool != "" && start.Pool != input.Pool {
+		if (input.Pool != "" && start.Pool != input.Pool) || start.ChannelPool != body["channel_pool_id"] {
 			common.ApiErrorT(c, "Selecting a pool at sign-in requires the matching CPA build")
 			return
 		}
@@ -168,7 +178,7 @@ func CPAAccountLogin(c *gin.Context) {
 		common.ApiSuccess(c, gin.H{"flow": token, "url": start.URL})
 		return
 	}
-	if input.Pool != "" {
+	if input.Pool != "" || input.ChannelID != 0 {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
@@ -190,6 +200,7 @@ func CPAAccountLogin(c *gin.Context) {
 	}
 	var status struct {
 		Status string `json:"status"`
+		Error  string `json:"error"`
 	}
 	if err := service.CallCPAManagement(ctx, http.MethodGet, "oauth/status?state="+url.QueryEscape(flow.Payload), nil, &status); err != nil {
 		common.ApiError(c, err)
@@ -205,5 +216,9 @@ func CPAAccountLogin(c *gin.Context) {
 	if status.Status == "ok" {
 		recordManageAudit(c, "channel.update", map[string]any{"source": "cpa_account_login"})
 	}
-	common.ApiSuccess(c, status)
+	if status.Error == "Account already belongs to another channel pool" {
+		common.ApiSuccess(c, gin.H{"status": "pool_conflict"})
+		return
+	}
+	common.ApiSuccess(c, gin.H{"status": status.Status})
 }

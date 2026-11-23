@@ -998,6 +998,8 @@ func decideTaskRetry(c *gin.Context, taskErr *taskdto.TaskError, retryTimes int)
 	switch {
 	case taskErr == nil:
 		stop.Reason = "request_completed"
+	case c.GetString("cpa_channel_pool") != "":
+		stop.Reason = "cpa_channel_pool"
 	case taskErr.NoRetry:
 		stop.Reason = "task_accepted"
 	case requestplugin.Stopped(taskErr):
