@@ -13,6 +13,22 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestChannelCollectionRoutesWithTrailingSlashRedirectsDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.RedirectTrailingSlash = false
+	registerChannelRoutes(engine.Group("/api"))
+	for _, suffix := range []string{"", "/"} {
+		assertChannelRoutePermission(t, http.MethodGet, suffix, authz.ChannelRead, controller.GetAllChannels)
+		assertChannelRoutePermission(t, http.MethodPost, suffix, authz.ChannelSensitiveWrite, controller.AddChannel)
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			recorder := httptest.NewRecorder()
+			engine.ServeHTTP(recorder, httptest.NewRequest(method, "/api/channel"+suffix+"?p=1&page_size=20", nil))
+			assert.Equal(t, http.StatusUnauthorized, recorder.Code, "%s /api/channel%s", method, suffix)
+		}
+	}
+}
+
 func TestChannelDefaultBaseURLsRequireReadPermission(t *testing.T) {
 	assertChannelRoutePermission(t, http.MethodGet, "/default_base_urls", authz.ChannelRead, controller.GetChannelDefaultBaseURLs)
 
