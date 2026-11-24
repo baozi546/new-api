@@ -702,6 +702,17 @@ func StorePluginLoginCredential(channelID int, pluginKey string, keyIndex *int, 
 			}
 		}
 		channel.Key = strings.Join(lines, "\n")
+		if plugin, ok := PluginOfChannel(channel); ok && plugin.Meta.AccountPool {
+			if channel.ChannelInfo.ProviderAccounts != nil {
+				state := channel.ChannelInfo.ProviderAccounts[credential.AccountID]
+				if state.Health == "login_required" || state.Health == "account_banned" {
+					state.Disabled = false
+				}
+				state.Health = ""
+				state.CheckedAt = 0
+				channel.ChannelInfo.ProviderAccounts[credential.AccountID] = state
+			}
+		}
 		enablePluginLoginChannel(channel, index, len(lines))
 		view = PluginCredentialView{Index: index, Label: credential.Label, AccountID: credential.AccountID, ExpiresAt: credential.ExpiresAt}
 		return nil
@@ -742,6 +753,9 @@ func enablePluginLoginChannel(channel *model.Channel, index, size int) {
 // credential yet as disabled until a login stores one.
 func PluginLoginNeededStatus(channel *model.Channel) {
 	if channel.Type != constant.ChannelTypeTaskPlugin {
+		return
+	}
+	if IsProviderPool(channel) {
 		return
 	}
 	channel.Status = common.ChannelStatusAutoDisabled

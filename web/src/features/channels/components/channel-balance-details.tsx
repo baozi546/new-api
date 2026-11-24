@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useTranslation } from 'react-i18next'
 
 import { toIntlLocale } from '@/i18n/languages'
+import { Progress } from '@/components/ui/progress'
 import { formatNumber, formatTimestampToDate } from '@/lib/format'
 import { resolveLocalizedText } from '@/lib/localized-text'
 import { cn } from '@/lib/utils'
@@ -26,6 +27,7 @@ import { cn } from '@/lib/utils'
 import type { ChannelBalanceResult } from '../types'
 
 type ChannelBalanceDetailsProps = {
+  showProgress?: boolean
   result?: ChannelBalanceResult | null
   /** Unix seconds of the last query; 0 when never queried. */
   updatedTime?: number
@@ -47,6 +49,7 @@ export function ChannelBalanceDetails(props: ChannelBalanceDetailsProps) {
     <ul className={cn('space-y-0.5 text-xs', props.className)}>
       {windows.map((window) => (
         <li key={JSON.stringify(window)}>
+          {props.showProgress && <Progress value={Math.min(100, Math.max(0, window.used / window.limit * 100))} aria-label={resolveLocalizedText(window.name, i18n.language) || t('Limit')} className='my-1' />}
           {resolveLocalizedText(window.name, i18n.language) || t('Limit')}:{' '}
           {formatNumber(window.used, locale)} /{' '}
           {formatNumber(window.limit, locale)}

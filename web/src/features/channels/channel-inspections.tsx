@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next'
 import { SectionPageLayout } from '@/components/layout'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { api } from '@/lib/api'
 import { formatTimestampToDate } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
@@ -14,6 +16,8 @@ import { useAuthStore } from '@/stores/auth-store'
 import { request } from './lib/cpa-channel-pools'
 
 type Settings = {
+  reasoning_effort?: string
+  degrade_after?: number
   title: string
   published: boolean
   scheduled: boolean
@@ -124,6 +128,17 @@ function Editor({
             />
           </label>
           <label>
+            {t('Reasoning effort')}
+            <Select value={draft.reasoning_effort || ''} onValueChange={(value) => setDraft({ ...draft, reasoning_effort: value || '' })} items={['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'].map((value) => ({ value, label: value || t('Model default') }))}>
+              <SelectTrigger className='w-full' aria-label={t('Reasoning effort')}><SelectValue /></SelectTrigger>
+              <SelectContent>{['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'].map((value) => <SelectItem key={value} value={value}>{value || t('Model default')}</SelectItem>)}</SelectContent>
+            </Select>
+          </label>
+          <label>
+            {t('Consecutive answer failures before isolation')}
+            <Input type='number' min={1} max={20} value={draft.degrade_after || 3} onChange={(event) => setDraft({ ...draft, degrade_after: event.target.valueAsNumber })} />
+          </label>
+          <label>
             {t('Channel concurrency (0 = unlimited)')}
             <Input
               type='number'
@@ -173,7 +188,7 @@ function Editor({
             </legend>
             <label>
               {t('Prompt')}
-              <textarea
+              <Textarea
                 required
                 className='w-full rounded-md border p-2'
                 value={q.prompt}
@@ -292,7 +307,7 @@ export function ChannelInspections() {
           <p>
             {t(
               manage
-                ? 'No channels with a dedicated CPA pool'
+                ? 'No account pool channels'
                 : 'No channel inspections published'
             )}
           </p>

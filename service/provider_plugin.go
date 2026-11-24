@@ -282,6 +282,10 @@ func refreshPluginCredentialLine(channelID, keyIndex int, used string) (string, 
 // so the automatic disabling setting does not apply: only the channel's own
 // switch, autoBan, keeps such a key in use.
 func DisablePluginCredentialForLogin(channelID int, channelName string, multiKey, autoBan bool, line string) {
+	if channel, err := model.GetChannelById(channelID, true); err == nil && IsProviderPool(channel) {
+		_ = MarkProviderPoolLoginRequired(channelID, line)
+		return
+	}
 	DisableChannel(types.ChannelError{
 		ChannelId:   channelID,
 		ChannelType: constant.ChannelTypeTaskPlugin,

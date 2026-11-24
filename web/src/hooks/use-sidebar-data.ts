@@ -144,6 +144,12 @@ export function useSidebarData(badges: SidebarBadges = {}): SidebarData {
             icon: Radio,
           },
           {
+            title: t('Account pools'),
+            url: '/account-pools',
+            icon: Users,
+            requiredRole: ROLE.ADMIN,
+          },
+          {
             title: t('Models'),
             url: '/models/metadata',
             icon: Box,

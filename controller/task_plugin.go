@@ -959,6 +959,7 @@ func GetTaskPluginOptions(c *gin.Context) {
 				_, _, hasIcon = plugins.Icon(meta.Key)
 			}
 			option := gin.H{
+				"accountPool":     meta.AccountPool,
 				"key":             meta.Key,
 				"name":            meta.Name,
 				"description":     meta.Description,

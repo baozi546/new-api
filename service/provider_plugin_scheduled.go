@@ -231,7 +231,7 @@ func (s *pluginScheduler) run(channel *model.Channel, plugin *jsplugin.LoadedPlu
 }
 
 func scheduledChannelEligible(channel *model.Channel) bool {
-	return channel.Status == common.ChannelStatusEnabled || channel.Status == common.ChannelStatusAutoDisabled
+	return IsProviderPool(channel) || channel.Status == common.ChannelStatusEnabled || channel.Status == common.ChannelStatusAutoDisabled
 }
 
 func scheduledKeyStatus(channel *model.Channel, index int) int {
@@ -245,6 +245,14 @@ func scheduledKeyStatus(channel *model.Channel, index int) int {
 }
 
 func scheduledKeyEligible(channel *model.Channel, plugin *jsplugin.LoadedPlugin, index int, line string) bool {
+	if plugin.Meta.AccountPool {
+		credential, ok := jsplugin.ParseCredential(line)
+		if !ok {
+			return false
+		}
+		state := channel.ChannelInfo.ProviderAccounts[credential.AccountID]
+		return credential.Plugin == plugin.Meta.Key && !credential.NeedsLogin && !state.Disabled && state.Health != "login_required" && state.Health != "account_banned"
+	}
 	status := scheduledKeyStatus(channel, index)
 	if status != common.ChannelStatusEnabled && status != common.ChannelStatusAutoDisabled || strings.TrimSpace(line) == "" {
 		return false
@@ -258,7 +266,7 @@ func scheduledKeyEligible(channel *model.Channel, plugin *jsplugin.LoadedPlugin,
 // runScheduledPlugin calls the hook without channel locks. Its result is
 // applied only while the prepared key still matches the stored key.
 func runScheduledPlugin(ctx context.Context, channel *model.Channel, plugin *jsplugin.LoadedPlugin, keyIndex int, line, reason string) (time.Duration, int, bool, error) {
-	if !common.IsMasterNode {
+	if !common.IsMasterNode && reason != "manual" {
 		return 0, 0, false, nil
 	}
 	prepared, err := FreshPluginCredentialLine(ctx, plugin, channel.Id, keyIndex, line)
@@ -283,7 +291,7 @@ func runScheduledPlugin(ctx context.Context, channel *model.Channel, plugin *jsp
 	if lines[keyIndex] != prepared {
 		return time.Minute, 0, false, nil
 	}
-	if !scheduledKeyEligible(current, plugin, keyIndex, prepared) {
+	if !scheduledKeyEligible(current, plugin, keyIndex, prepared) && reason != "manual" {
 		return 0, 0, false, nil
 	}
 	credential, isCredential := jsplugin.ParseCredential(prepared)
@@ -324,6 +332,19 @@ func runScheduledPlugin(ctx context.Context, channel *model.Channel, plugin *jsp
 			return 0, 0, false, err
 		}
 	}
+	var nextProfile jsplugin.AccountProfile
+	if plugin.Meta.AccountPool && isCredential {
+		nextCredential, ok := jsplugin.ParseCredential(nextLine)
+		if !ok {
+			return 0, 0, false, errors.New("scheduled credential is invalid")
+		}
+		nextProfile, err = plugin.CallDescribeAccount(ctx, jsplugin.CredentialContext{
+			BaseURL: hookCtx.BaseURL, Credential: nextCredential.Data, Config: hookCtx.Config,
+		})
+		if err != nil {
+			return 0, 0, false, err
+		}
+	}
 	statusReason := result.Notify.Text("en")
 	if statusReason == "" {
 		statusReason = "Disabled by plugin"
@@ -344,7 +365,7 @@ func runScheduledPlugin(ctx context.Context, channel *model.Channel, plugin *jsp
 			delay = time.Minute
 			return nil
 		}
-		if !scheduledKeyEligible(current, plugin, keyIndex, prepared) {
+		if !scheduledKeyEligible(current, plugin, keyIndex, prepared) && reason != "manual" {
 			return nil
 		}
 		if nextLine != prepared {
@@ -352,11 +373,31 @@ func runScheduledPlugin(ctx context.Context, channel *model.Channel, plugin *jsp
 			current.Key = strings.Join(lines, "\n")
 			current.Keys = nil
 		}
+		if plugin.Meta.AccountPool && isCredential {
+			if current.ChannelInfo.ProviderAccounts == nil {
+				current.ChannelInfo.ProviderAccounts = map[string]model.ProviderAccountState{}
+			}
+			state := current.ChannelInfo.ProviderAccounts[credential.AccountID]
+			state.Profile = nextProfile
+			current.ChannelInfo.ProviderAccounts[credential.AccountID] = state
+		}
 		switch result.KeyStatus {
 		case "enabled":
-			statusChanged = model.SetScheduledChannelKeyStatus(current, keyIndex, common.ChannelStatusEnabled, "")
+			if !plugin.Meta.AccountPool {
+				statusChanged = model.SetScheduledChannelKeyStatus(current, keyIndex, common.ChannelStatusEnabled, "")
+			}
 		case "auto_disabled":
-			statusChanged = model.SetScheduledChannelKeyStatus(current, keyIndex, common.ChannelStatusAutoDisabled, statusReason)
+			if plugin.Meta.AccountPool && isCredential {
+				if current.ChannelInfo.ProviderAccounts == nil {
+					current.ChannelInfo.ProviderAccounts = map[string]model.ProviderAccountState{}
+				}
+				state := current.ChannelInfo.ProviderAccounts[credential.AccountID]
+				state.Health = "login_required"
+				state.CheckedAt = time.Now().Unix()
+				current.ChannelInfo.ProviderAccounts[credential.AccountID] = state
+			} else {
+				statusChanged = model.SetScheduledChannelKeyStatus(current, keyIndex, common.ChannelStatusAutoDisabled, statusReason)
+			}
 		}
 		applied, delay = true, result.Next
 		return nil

@@ -253,6 +253,7 @@ import { ChannelPluginConfigFields } from './channel-plugin-config-fields'
 import { ChannelProviderPicker } from './channel-provider-picker'
 import { ChannelRequestPluginsField } from './channel-request-plugins-field'
 import { PluginCredentialPanel } from './plugin-credential-panel'
+import { ProviderPoolPanel } from '../provider-pool-panel'
 import {
   ChannelApiAccessSection,
   ChannelAuthSection,
@@ -4623,6 +4624,9 @@ export function ChannelMutateDrawer({
               )}
 
               {pluginLogin ? (
+                <>
+                {boundTaskPlugin?.accountPool && <ProviderPoolPanel channelId={loginChannelId} plugin={boundTaskPlugin} disabled={!canOperateChannel} />}
+                {!boundTaskPlugin?.accountPool && (
                 <PluginCredentialPanel
                   channelId={loginChannelId}
                   multiKey={isMultiKeyChannel}
@@ -4637,6 +4641,8 @@ export function ChannelMutateDrawer({
                     })
                   }}
                 />
+                )}
+                </>
               ) : (
                 <FormField
                   control={form.control}

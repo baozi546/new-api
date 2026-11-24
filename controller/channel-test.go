@@ -38,9 +38,17 @@ import (
 )
 
 type testResult struct {
+	response    []byte
+	statusCode  int
 	context     *gin.Context
 	localErr    error
 	newAPIError *types.NewAPIError
+}
+
+type accountInspectionInput struct {
+	AccountID string
+	Prompt    string
+	Effort    string
 }
 
 func normalizeChannelTestEndpoint(channel *model.Channel, endpointType string) string {
@@ -99,7 +107,7 @@ func resolveChannelTestUserID(c *gin.Context) (int, error) {
 	return rootUser.Id, nil
 }
 
-func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool) testResult {
+func testChannel(ctx context.Context, channel *model.Channel, testUserID int, testModel string, endpointType string, isStream bool, inspection ...accountInspectionInput) testResult {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -211,12 +219,31 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	group, _ := model.GetUserGroup(testUserID, false)
 	c.Set("group", group)
 
+	if len(inspection) > 0 {
+		c.Set("provider_pool_fixed_account", inspection[0].AccountID)
+	}
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)
 	if newAPIError != nil {
 		return testResult{
 			context:     c,
 			localErr:    newAPIError,
 			newAPIError: newAPIError,
+		}
+	}
+	if value, ok := c.Get("provider_pool_account"); ok {
+		if account, ok := value.(service.ProviderPoolAccount); ok {
+			slotCtx, release, err := service.AcquireProviderAccountSlot(c.Request.Context(), service.ProviderPoolAccountKey(account.Owner.GetSetting().TaskPluginKey, account.AccountID), service.ProviderPoolAccountLimit(account))
+			if err != nil {
+				return testResult{localErr: err}
+			}
+			defer release()
+			c.Request = c.Request.WithContext(slotCtx)
+			currentAccount, currentErr := service.RevalidateProviderPoolAccount(c, channel.Id)
+			if currentErr != nil {
+				return testResult{localErr: currentErr}
+			}
+			common.SetContextKey(c, constant.ContextKeyChannelKey, currentAccount.Line)
+			common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, currentAccount.Index)
 		}
 	}
 
@@ -271,6 +298,13 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 
 	request := buildTestRequest(testModel, endpointType, channel, isStream)
+	if len(inspection) > 0 {
+		request = &dto.GeneralOpenAIRequest{
+			Model: testModel, Stream: common.GetPointer(false),
+			Messages:        []dto.Message{{Role: "user", Content: inspection[0].Prompt}},
+			ReasoningEffort: inspection[0].Effort,
+		}
+	}
 
 	info, err := relaycommon.GenRelayInfo(c, relayFormat, request, nil)
 
@@ -503,7 +537,8 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 			return testResult{
 				context:     c,
 				localErr:    err,
-				newAPIError: types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError),
+				statusCode:  httpResp.StatusCode,
+				newAPIError: types.NewOpenAIError(err, types.ErrorCodeBadResponse, httpResp.StatusCode),
 			}
 		}
 	}
@@ -539,6 +574,9 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 			newAPIError: types.NewOpenAIError(bodyErr, types.ErrorCodeBadResponseBody, http.StatusInternalServerError),
 		}
 	}
+	if len(inspection) > 0 {
+		return testResult{response: respBody, context: c}
+	}
 	info.SetEstimatePromptTokens(usage.PromptTokens)
 
 	quota, tieredResult := settleTestQuota(info, priceData, usage)
@@ -561,6 +599,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	})
 	common.SysLog(common.LogText("testing channel #%d, response: \n%s", channel.Id, string(respBody)))
 	return testResult{
+		response:    respBody,
 		context:     c,
 		localErr:    nil,
 		newAPIError: nil,

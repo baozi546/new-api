@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/url"
@@ -345,6 +346,54 @@ func (p *LoadedPlugin) CallRefresh(ctx context.Context, hookCtx CredentialContex
 		return CredentialResult{}, fmt.Errorf("plugin %s %w", p.Meta.Key, err)
 	}
 	return credential, nil
+}
+
+// CallImportCredential validates an imported provider representation without
+// allowing a browser to inject the host's internal credential wrapper.
+func (p *LoadedPlugin) CallImportCredential(ctx context.Context, hookCtx CredentialContext, input json.RawMessage) (CredentialResult, error) {
+	result, err := p.Engine.Call(ctx, "importCredential", hookCtx.value(), RawJSON(input))
+	if err != nil {
+		return CredentialResult{}, err
+	}
+	object, err := resultObject(result, "importCredential result")
+	if err != nil {
+		return CredentialResult{}, err
+	}
+	return decodeCredentialResult(object, "importCredential result")
+}
+
+// AccountProfile contains only explicitly public provider account properties.
+type AccountProfile struct {
+	Plan           string          `json:"plan"`
+	Category       string          `json:"category"`
+	PlanVerified   bool            `json:"plan_verified"`
+	Windows        []BalanceWindow `json:"windows"`
+	QuotaCheckedAt int64           `json:"quota_checked_at"`
+	QuotaError     string          `json:"quota_error"`
+}
+
+func (p *LoadedPlugin) CallDescribeAccount(ctx context.Context, hookCtx CredentialContext) (AccountProfile, error) {
+	value, err := p.Engine.Call(ctx, "describeAccount", hookCtx.value())
+	if err != nil {
+		return AccountProfile{}, err
+	}
+	raw, err := common.Marshal(value)
+	if err != nil || len(raw) > 16<<10 {
+		return AccountProfile{}, errors.New("invalid account profile")
+	}
+	var profile AccountProfile
+	if err := common.Unmarshal(raw, &profile); err != nil {
+		return profile, err
+	}
+	if len(profile.Plan) > 128 || len(profile.Category) > 64 || len(profile.QuotaError) > 128 || len(profile.Windows) > maxBalanceWindows {
+		return AccountProfile{}, errors.New("invalid account profile")
+	}
+	for _, window := range profile.Windows {
+		if math.IsNaN(window.Used) || math.IsInf(window.Used, 0) || window.Used < 0 || math.IsNaN(window.Limit) || math.IsInf(window.Limit, 0) || window.Limit <= 0 || window.ResetAt < 0 {
+			return AccountProfile{}, errors.New("invalid account quota window")
+		}
+	}
+	return profile, nil
 }
 
 // ScheduledContext is the current key and the trigger of scheduled.

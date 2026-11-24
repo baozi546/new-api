@@ -13,6 +13,8 @@ var defaultGroupRatio = map[string]float64{
 	"default": 1,
 	"vip":     1,
 	"svip":    1,
+	"plus":    1,
+	"pro":     1,
 }
 
 var groupRatioMap = types.NewRWMap[string, float64]()

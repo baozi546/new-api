@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/QuantumNous/new-api/service"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -63,11 +64,20 @@ func (a *Adaptor) runChain(c *gin.Context, info *relaycommon.RelayInfo, first js
 		}
 		// The plugin's error with status 401 rejects the credential too.
 		rejected = rejected || (canRenew && outcome.response != nil && outcome.response.StatusCode == http.StatusUnauthorized)
-		if rejected && !renewed {
-			renewed = true
-			if a.renew(c, info) == nil {
-				outcome.close()
-				continue
+		if rejected {
+			if !renewed {
+				renewed = true
+				if a.renew(c, info) == nil {
+					outcome.close()
+					continue
+				}
+			}
+			if a.plugin.Meta.AccountPool && a.credential != nil {
+				status := http.StatusUnauthorized
+				if outcome.response != nil {
+					status = outcome.response.StatusCode
+				}
+				_ = service.MarkProviderPoolProblem(service.ProviderCredentialOwner(c, info.ChannelId), info.ApiKey, status)
 			}
 		}
 		a.addTools(outcome.tools)

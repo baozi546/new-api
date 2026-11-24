@@ -26,6 +26,7 @@ import { Route as errors403RouteImport } from './routes/(errors)/403'
 import { Route as errors404RouteImport } from './routes/(errors)/404'
 import { Route as errors500RouteImport } from './routes/(errors)/500'
 import { Route as errors503RouteImport } from './routes/(errors)/503'
+import { Route as AuthenticatedAccountPoolsRouteImport } from './routes/_authenticated/account-pools'
 import { Route as AuthenticatedChannelInspectionsRouteImport } from './routes/_authenticated/channel-inspections'
 import { Route as AuthenticatedChat2linkRouteImport } from './routes/_authenticated/chat2link'
 import { Route as AuthenticatedSystemSettingsRouteRouteImport } from './routes/_authenticated/system-settings/route'
@@ -159,6 +160,12 @@ const errors503Route = errors503RouteImport.update({
   path: '/503',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AuthenticatedAccountPoolsRoute =
+  AuthenticatedAccountPoolsRouteImport.update({
+    id: '/account-pools',
+    path: '/account-pools',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedChannelInspectionsRoute =
   AuthenticatedChannelInspectionsRouteImport.update({
     id: '/channel-inspections',
@@ -460,6 +467,7 @@ export interface FileRoutesByFullPath {
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
+  '/account-pools': typeof AuthenticatedAccountPoolsRoute
   '/channel-inspections': typeof AuthenticatedChannelInspectionsRoute
   '/chat2link': typeof AuthenticatedChat2linkRoute
   '/oauth/$provider': typeof OauthProviderRoute
@@ -525,6 +533,7 @@ export interface FileRoutesByTo {
   '/404': typeof errors404Route
   '/500': typeof errors500Route
   '/503': typeof errors503Route
+  '/account-pools': typeof AuthenticatedAccountPoolsRoute
   '/channel-inspections': typeof AuthenticatedChannelInspectionsRoute
   '/chat2link': typeof AuthenticatedChat2linkRoute
   '/oauth/$provider': typeof OauthProviderRoute
@@ -594,6 +603,7 @@ export interface FileRoutesById {
   '/(errors)/404': typeof errors404Route
   '/(errors)/500': typeof errors500Route
   '/(errors)/503': typeof errors503Route
+  '/_authenticated/account-pools': typeof AuthenticatedAccountPoolsRoute
   '/_authenticated/channel-inspections': typeof AuthenticatedChannelInspectionsRoute
   '/_authenticated/chat2link': typeof AuthenticatedChat2linkRoute
   '/oauth/$provider': typeof OauthProviderRoute
@@ -662,6 +672,7 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/503'
+    | '/account-pools'
     | '/channel-inspections'
     | '/chat2link'
     | '/oauth/$provider'
@@ -727,6 +738,7 @@ export interface FileRouteTypes {
     | '/404'
     | '/500'
     | '/503'
+    | '/account-pools'
     | '/channel-inspections'
     | '/chat2link'
     | '/oauth/$provider'
@@ -795,6 +807,7 @@ export interface FileRouteTypes {
     | '/(errors)/404'
     | '/(errors)/500'
     | '/(errors)/503'
+    | '/_authenticated/account-pools'
     | '/_authenticated/channel-inspections'
     | '/_authenticated/chat2link'
     | '/oauth/$provider'
@@ -984,6 +997,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/503'
       preLoaderRoute: typeof errors503RouteImport
       parentRoute: typeof rootRouteImport
+    }
+    '/_authenticated/account-pools': {
+      id: '/_authenticated/account-pools'
+      path: '/account-pools'
+      fullPath: '/account-pools'
+      preLoaderRoute: typeof AuthenticatedAccountPoolsRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
     }
     '/_authenticated/channel-inspections': {
       id: '/_authenticated/channel-inspections'
@@ -1422,6 +1442,7 @@ const AuthenticatedSystemSettingsRouteRouteWithChildren =
 
 interface AuthenticatedRouteRouteChildren {
   AuthenticatedSystemSettingsRouteRoute: typeof AuthenticatedSystemSettingsRouteRouteWithChildren
+  AuthenticatedAccountPoolsRoute: typeof AuthenticatedAccountPoolsRoute
   AuthenticatedChannelInspectionsRoute: typeof AuthenticatedChannelInspectionsRoute
   AuthenticatedChat2linkRoute: typeof AuthenticatedChat2linkRoute
   AuthenticatedChatChatIdRoute: typeof AuthenticatedChatChatIdRoute
@@ -1451,6 +1472,7 @@ interface AuthenticatedRouteRouteChildren {
 const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
   AuthenticatedSystemSettingsRouteRoute:
     AuthenticatedSystemSettingsRouteRouteWithChildren,
+  AuthenticatedAccountPoolsRoute: AuthenticatedAccountPoolsRoute,
   AuthenticatedChannelInspectionsRoute: AuthenticatedChannelInspectionsRoute,
   AuthenticatedChat2linkRoute: AuthenticatedChat2linkRoute,
   AuthenticatedChatChatIdRoute: AuthenticatedChatChatIdRoute,

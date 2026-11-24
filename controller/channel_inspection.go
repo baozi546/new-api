@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
@@ -22,13 +24,15 @@ type inspectionQuestion struct {
 	Answer string `json:"answer"`
 }
 type inspectionConfig struct {
-	Title     string               `json:"title"`
-	Published bool                 `json:"published"`
-	Scheduled bool                 `json:"scheduled"`
-	Minutes   int                  `json:"minutes"`
-	Limit     int                  `json:"limit"`
-	Model     string               `json:"model"`
-	Questions []inspectionQuestion `json:"questions"`
+	ReasoningEffort string               `json:"reasoning_effort"`
+	DegradeAfter    int                  `json:"degrade_after"`
+	Title           string               `json:"title"`
+	Published       bool                 `json:"published"`
+	Scheduled       bool                 `json:"scheduled"`
+	Minutes         int                  `json:"minutes"`
+	Limit           int                  `json:"limit"`
+	Model           string               `json:"model"`
+	Questions       []inspectionQuestion `json:"questions"`
 }
 type accountMark struct {
 	ID     string `json:"id"`
@@ -49,6 +53,9 @@ type inspectionRound struct {
 var inspecting sync.Map
 
 func inspectionKey(c *model.Channel, kind string) string {
+	if service.IsProviderPool(c) {
+		return fmt.Sprintf("ProviderInspection/%d/%s", c.Id, kind)
+	}
 	pool := c.CPAPoolID
 	if kind == "last" {
 		pool += c.CPAAccountPath()
@@ -69,6 +76,9 @@ func inspectionSettings(c *model.Channel) inspectionConfig {
 	return cfg
 }
 func (cfg inspectionConfig) valid() bool {
+	if cfg.DegradeAfter < 0 || cfg.DegradeAfter > 20 || !slices.Contains([]string{"", "none", "minimal", "low", "medium", "high", "xhigh"}, cfg.ReasoningEffort) {
+		return false
+	}
 	if cfg.Minutes < 1 || cfg.Minutes > 10080 || cfg.Limit < 0 || cfg.Limit > 1000000 || len(cfg.Title) > 160 || (cfg.Published && strings.TrimSpace(cfg.Title) == "") || len(cfg.Model) > 160 || (cfg.Scheduled && strings.TrimSpace(cfg.Model) == "") || len(cfg.Questions) < 1 || len(cfg.Questions) > 32 {
 		return false
 	}
@@ -81,10 +91,10 @@ func (cfg inspectionConfig) valid() bool {
 }
 func inspectionChannels() ([]model.Channel, error) {
 	var all []model.Channel
-	err := model.DB.Select("id", "name", "base_url", "type", "cpa_pool_id", "cpa_account_pool", "group").Where("cpa_pool_id <> ?", "").Order("id").Find(&all).Error
+	err := model.DB.Where("cpa_pool_id <> ? OR type = ?", "", constant.ChannelTypeTaskPlugin).Order("id").Find(&all).Error
 	result := all[:0]
 	for _, ch := range all {
-		if matchesCPAChannel(&ch) {
+		if matchesCPAChannel(&ch) || service.IsProviderPool(&ch) {
 			result = append(result, ch)
 		}
 	}
@@ -93,8 +103,8 @@ func inspectionChannels() ([]model.Channel, error) {
 func inspectionTarget(c *gin.Context) *model.Channel {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err == nil && id > 0 {
-		ch, err := model.GetChannelById(id, false)
-		if err == nil && ch.CPAPoolID != "" && matchesCPAChannel(ch) {
+		ch, err := model.GetChannelById(id, true)
+		if err == nil && (ch.CPAPoolID != "" && matchesCPAChannel(ch) || service.IsProviderPool(ch)) {
 			return ch
 		}
 	}
@@ -108,6 +118,23 @@ func listChannelInspections(c *gin.Context, admin bool) {
 	if err != nil {
 		common.ApiErrorT(c, "Request failed")
 		return
+	}
+	if !admin {
+		userGroup, groupErr := model.GetUserGroup(c.GetInt("id"), false)
+		if groupErr != nil {
+			common.ApiErrorT(c, "Request failed")
+			return
+		}
+		visible := channels[:0]
+		for _, channel := range channels {
+			for _, group := range channel.GetGroups() {
+				if service.GroupInUserUsableGroups(userGroup, group) {
+					visible = append(visible, channel)
+					break
+				}
+			}
+		}
+		channels = visible
 	}
 	rows := make([]gin.H, 0, len(channels))
 	for _, ch := range channels {
@@ -192,6 +219,9 @@ func launchInspection(ch model.Channel, cfg inspectionConfig) bool {
 	return true
 }
 func inspectChannel(ch model.Channel, cfg inspectionConfig) error {
+	if service.IsProviderPool(&ch) {
+		return inspectProviderPoolChannel(ch, cfg)
+	}
 	var prev inspectionRound
 	readInspection(&ch, "last", &prev)
 	round := inspectionRound{Sequence: prev.Sequence + 1, Accounts: []accountMark{}}
@@ -258,6 +288,9 @@ func StartChannelInspectionSchedule() {
 		ticker := time.NewTicker(time.Minute)
 		defer ticker.Stop()
 		for now := range ticker.C {
+			if !common.IsMasterNode {
+				continue
+			}
 			channels, err := inspectionChannels()
 			if err != nil {
 				continue

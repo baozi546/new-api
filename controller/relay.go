@@ -236,6 +236,35 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = types.NewErrorWithStatusCode(waitErr, types.ErrorCodeGetChannelFailed, http.StatusRequestTimeout, types.ErrOptionWithSkipRetry())
 			break
 		}
+		if value, ok := c.Get("provider_pool_account"); ok {
+			if account, ok := value.(service.ProviderPoolAccount); ok {
+				originalContext := c.Request.Context()
+				slotContext, accountRelease, err := service.AcquireProviderAccountSlot(originalContext,
+					service.ProviderPoolAccountKey(account.Owner.GetSetting().TaskPluginKey, account.AccountID), service.ProviderPoolAccountLimit(account))
+				if err != nil {
+					release()
+					newAPIError = types.NewErrorWithStatusCode(err, types.ErrorCodeGetChannelFailed, http.StatusRequestTimeout, types.ErrOptionWithSkipRetry())
+					break
+				}
+				c.Request = c.Request.WithContext(slotContext)
+				currentAccount, currentErr := service.RevalidateProviderPoolAccount(c, channel.Id)
+				if currentErr != nil {
+					accountRelease()
+					release()
+					c.Request = c.Request.WithContext(originalContext)
+					newAPIError = types.NewErrorWithStatusCode(currentErr, types.ErrorCodeChannelNoAvailableKey, http.StatusServiceUnavailable, types.ErrOptionWithSkipRetry())
+					break
+				}
+				common.SetContextKey(c, constant.ContextKeyChannelKey, currentAccount.Line)
+				common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, currentAccount.Index)
+				channelRelease := release
+				release = func() {
+					accountRelease()
+					channelRelease()
+					c.Request = c.Request.WithContext(originalContext)
+				}
+			}
+		}
 		func() {
 			defer release()
 			finishReply := requestplugin.Reply(c, relayFormat, relayInfo)
@@ -263,7 +292,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		decision := service.DecideRelayRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry())
 		service.RecordPolicyFailure(c, channel.Id, newAPIError, decision)
-		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError, relayInfo)
+		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan() && c.GetInt("provider_pool_owner_id") == 0), newAPIError, relayInfo)
 
 		if decision.Action != "retry" {
 			break

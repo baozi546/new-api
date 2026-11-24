@@ -64,7 +64,14 @@ export function TaskPluginChannelBadge(props: { pluginKey?: string }) {
   const { t } = useTranslation()
   const plugin = useTaskPluginOption(props.pluginKey)
   // Plugins that serve relay routes are not only task plugins.
-  const kind = plugin?.provider ? t('Plugin') : t('Task Plugin')
+  let kind: string
+  if (plugin?.accountPool) {
+    kind = t('Account pool')
+  } else if (plugin?.provider) {
+    kind = t('Plugin')
+  } else {
+    kind = t('Task Plugin')
+  }
   const label = plugin?.name || props.pluginKey || kind
   const iconInput =
     plugin ?? (props.pluginKey ? { key: props.pluginKey } : undefined)

@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": ["apiVersion", "key", "name", "version", "author"],
   "properties": {
+    "accountPool": {"type": "boolean", "default": false, "description": "Share provider accounts across channels using this plugin and the same base URL. Requires relay routes, login and describeAccount."},
     "sortPriority": {"type": "integer", "minimum": -2147483648, "maximum": 2147483647, "default": 0},
     "website": {"oneOf": [{"const": ""}, {"type": "string", "format": "uri", "pattern": "^[Hh][Tt][Tt][Pp][Ss]://[^/@?#\\s]+(?:[/?#]|$)"}], "description": "Absolute HTTPS URL with a valid ASCII hostname (use punycode for internationalized domains) and no credentials; validated by the host."},
     "apiVersion": {"const": 1}, "key": {"type": "string"}, "name": {"allOf": [{"$ref": "#/$defs/localizedText"}, {"if": {"type": "object"}, "then": {"additionalProperties": {"maxLength": 128}}}]}, "icon": {"type": "string", "maxLength": 128}, "description": {"$ref": "#/$defs/localizedText"}, "version": {"type": "string"},

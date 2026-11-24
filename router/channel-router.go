@@ -55,6 +55,14 @@ func registerChannelRoutes(apiRouter *gin.RouterGroup) {
 }
 
 var channelPermissionRoutes = []permissionRoute{
+	{method: http.MethodGet, path: "/account_pools", permission: authz.ChannelRead, handler: controller.ListProviderAccountPools},
+	{method: http.MethodPost, path: "/account_pools", permission: authz.ChannelWrite, handler: controller.CreateProviderAccountPool},
+	{method: http.MethodPost, path: "/:id/account_pool/login", permission: authz.ChannelOperate, handler: controller.StartProviderPoolLogin},
+	{method: http.MethodPost, path: "/:id/account_pool/login/continue", permission: authz.ChannelOperate, handler: controller.ContinueProviderPoolLogin},
+	{method: http.MethodGet, path: "/:id/account_pool", permission: authz.ChannelRead, handler: controller.GetProviderAccountPool},
+	{method: http.MethodPut, path: "/:id/account_pool", permission: authz.ChannelWrite, handler: controller.SaveProviderAccountPool},
+	{method: http.MethodPost, path: "/:id/account_pool/import", permission: authz.ChannelOperate, handler: controller.ImportProviderAccount},
+	{method: http.MethodPost, path: "/:id/account_pool/accounts/:account_id", permission: authz.ChannelOperate, handler: controller.OperateProviderAccount},
 	{method: http.MethodGet, path: "/priority/order", permission: authz.ChannelRead, handler: controller.GetChannelPriorityOrder},
 	{method: http.MethodPost, path: "/priority/reorder", permission: authz.ChannelWrite, handler: controller.ReorderChannelPriority},
 	{method: http.MethodGet, path: "", permission: authz.ChannelRead, handler: controller.GetAllChannels},

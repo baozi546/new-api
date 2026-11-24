@@ -713,11 +713,25 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 
-	key, index, newAPIError := channel.GetNextEnabledKey()
+	c.Set("provider_pool_owner_id", 0)
+	c.Set("provider_pool_account_id", "")
+	c.Set("provider_pool_account", nil)
+	var key string
+	var index int
+	var newAPIError *types.NewAPIError
+	if service.IsProviderPool(channel) {
+		var poolErr error
+		key, index, poolErr = service.SelectProviderPoolAccount(c, channel)
+		if poolErr != nil {
+			return types.NewError(poolErr, types.ErrorCodeChannelNoAvailableKey)
+		}
+	} else {
+		key, index, newAPIError = channel.GetNextEnabledKey()
+	}
 	if newAPIError != nil {
 		return newAPIError
 	}
-	if channel.ChannelInfo.IsMultiKey {
+	if channel.ChannelInfo.IsMultiKey || service.IsProviderPool(channel) {
 		common.SetContextKey(c, constant.ContextKeyChannelIsMultiKey, true)
 		common.SetContextKey(c, constant.ContextKeyChannelMultiKeyIndex, index)
 	} else {

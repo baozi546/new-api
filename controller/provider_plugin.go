@@ -1,9 +1,11 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"io"
 	"strconv"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
@@ -53,6 +55,19 @@ func pluginLoginChannelID(c *gin.Context) (int, bool) {
 func finishPluginLogin(c *gin.Context, result service.PluginLoginResult, data gin.H) {
 	if credential := result.Step.Credential; credential != nil {
 		model.InitChannelCache()
+		if channel, err := model.GetChannelById(result.ChannelID, true); err == nil && service.IsProviderPool(channel) {
+			account, findErr := service.FindProviderPoolAccount(c.Request.Context(), channel, credential.AccountID)
+			if findErr == nil {
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+					defer cancel()
+					if err := service.RefreshProviderPoolAccount(ctx, account); err != nil {
+						common.SysLog(common.LogText("provider account quota refresh failed after login: channel_id=%d category=%s", result.ChannelID, "provider_error"))
+					}
+					model.InitChannelCache()
+				}()
+			}
+		}
 		recordManageAudit(c, "channel.update", map[string]any{
 			"id":             result.ChannelID,
 			"name":           result.ChannelName,

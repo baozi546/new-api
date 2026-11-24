@@ -92,6 +92,7 @@ export async function getInferenceStatus(
 }
 
 export type TaskPluginOption = {
+  accountPool?: boolean
   sortPriority?: number
   website?: string
   key: string
@@ -483,13 +484,14 @@ export async function resetCodexUsage(
 export async function startPluginLogin(
   channelId: number,
   keyIndex: number | null,
-  add = false
+  add = false,
+  pool = false
 ): Promise<{ flow: string; step: PluginLoginStep }> {
   const res = await api.post<{
     success: boolean
     data: { flow: string; step: PluginLoginStep }
   }>(
-    `/api/channel/${channelId}/plugin_login`,
+    `/api/channel/${channelId}/${pool ? 'account_pool/login' : 'plugin_login'}`,
     add ? { add: true } : { key_index: keyIndex },
     channelActionConfig()
   )
@@ -499,13 +501,14 @@ export async function startPluginLogin(
 export async function continuePluginLogin(
   channelId: number,
   flow: string,
-  input: PluginLoginInput
+  input: PluginLoginInput,
+  pool = false
 ): Promise<PluginLoginStep> {
   const res = await api.post<{
     success: boolean
     data: { step: PluginLoginStep }
   }>(
-    `/api/channel/${channelId}/plugin_login/continue`,
+    `/api/channel/${channelId}/${pool ? 'account_pool/login' : 'plugin_login'}/continue`,
     { flow, input },
     channelActionConfig()
   )

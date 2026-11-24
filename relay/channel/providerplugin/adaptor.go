@@ -272,11 +272,25 @@ func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, request
 		return nil, err
 	}
 	resp, _ := response.(*http.Response)
-	if resp == nil || !a.canRenew() || !a.rejected(c, info, resp) || a.renew(c, info) != nil {
+	if resp == nil || !a.canRenew() || !a.rejected(c, info, resp) {
+		return response, nil
+	}
+	if a.renew(c, info) != nil {
+		if a.plugin.Meta.AccountPool && a.credential != nil {
+			_ = service.MarkProviderPoolProblem(service.ProviderCredentialOwner(c, info.ChannelId), info.ApiKey, resp.StatusCode)
+		}
 		return response, nil
 	}
 	_ = resp.Body.Close()
-	return a.send(c, info, bytes.NewReader(body))
+	retried, err := a.send(c, info, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	retriedResponse, _ := retried.(*http.Response)
+	if retriedResponse != nil && a.plugin.Meta.AccountPool && a.rejected(c, info, retriedResponse) {
+		_ = service.MarkProviderPoolProblem(service.ProviderCredentialOwner(c, info.ChannelId), info.ApiKey, retriedResponse.StatusCode)
+	}
+	return retried, nil
 }
 
 // DoResponse relays the response as the route's handler does, then bills the
@@ -543,16 +557,24 @@ func (a *Adaptor) bind(c *gin.Context, info *relaycommon.RelayInfo) error {
 // credential only a login restores fails the attempt before the upstream, and
 // the request may retry on another key or channel.
 func (a *Adaptor) useFreshCredential(c *gin.Context, info *relaycommon.RelayInfo) error {
+	if a.plugin.Meta.AccountPool && c.GetInt("provider_pool_owner_id") > 0 {
+		account, err := service.RevalidateProviderPoolAccount(c, info.ChannelId)
+		if err != nil {
+			return err
+		}
+		info.ChannelMultiKeyIndex = account.Index
+		a.useCredentialLine(c, info, account.Line)
+	}
 	if a.credential == nil {
 		return nil
 	}
 	if a.credential.NeedsLogin {
 		// Only a login restores the key, even after an administrator enabled
 		// it again: disable it for the reason a login clears.
-		service.DisablePluginCredentialForLogin(info.ChannelId, common.GetContextKeyString(c, constant.ContextKeyChannelName), info.ChannelIsMultiKey, common.GetContextKeyBool(c, constant.ContextKeyChannelAutoBan), info.ApiKey)
+		service.DisablePluginCredentialForLogin(service.ProviderCredentialOwner(c, info.ChannelId), common.GetContextKeyString(c, constant.ContextKeyChannelName), info.ChannelIsMultiKey, common.GetContextKeyBool(c, constant.ContextKeyChannelAutoBan), info.ApiKey)
 		return types.NewError(service.ErrPluginCredentialNeedsLogin, types.ErrorCodeDoRequestFailed)
 	}
-	line, err := service.FreshPluginCredentialLine(c.Request.Context(), a.plugin, info.ChannelId, credentialIndex(info), info.ApiKey)
+	line, err := service.FreshPluginCredentialLine(c.Request.Context(), a.plugin, service.ProviderCredentialOwner(c, info.ChannelId), credentialIndex(info), info.ApiKey)
 	if errors.Is(err, service.ErrPluginCredentialNeedsLogin) {
 		// The refresh disabled the key for a new login already.
 		return types.NewError(err, types.ErrorCodeDoRequestFailed)
@@ -645,7 +667,7 @@ func (a *Adaptor) renew(c *gin.Context, info *relaycommon.RelayInfo) error {
 		}
 		return nil
 	}
-	line, err := service.RefreshPluginCredential(c.Request.Context(), info.ChannelId, credentialIndex(info), info.ApiKey)
+	line, err := service.RefreshPluginCredential(c.Request.Context(), service.ProviderCredentialOwner(c, info.ChannelId), credentialIndex(info), info.ApiKey)
 	if err != nil {
 		logger.LogWarn(c, common.LogText("plugin credential refresh after a rejection failed: plugin=%s channel_id=%d", a.plugin.Meta.Key, info.ChannelId))
 		return err
@@ -751,6 +773,9 @@ func (a *Adaptor) prepare(c *gin.Context, info *relaycommon.RelayInfo, body []by
 // readable for the error handling.
 func (a *Adaptor) rejected(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) bool {
 	if resp.StatusCode == http.StatusUnauthorized {
+		if a.plugin.Meta.AccountPool {
+			c.Set("provider_pool_rejected", true)
+		}
 		return true
 	}
 	if (resp.StatusCode >= 200 && resp.StatusCode < 300) || !a.plugin.HasProviderHook("credentialRejected") {
@@ -765,6 +790,9 @@ func (a *Adaptor) rejected(c *gin.Context, info *relaycommon.RelayInfo, resp *ht
 	if err != nil {
 		logger.LogWarn(c, common.LogText("plugin credentialRejected failed: plugin=%s channel_id=%d", a.plugin.Meta.Key, info.ChannelId))
 		return false
+	}
+	if rejected && a.plugin.Meta.AccountPool {
+		c.Set("provider_pool_rejected", true)
 	}
 	return rejected
 }

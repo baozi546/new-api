@@ -161,9 +161,8 @@ func TestBuiltInTaskPluginResponsesAndUsageContracts(t *testing.T) {
 			actualKeys = append(actualKeys, entry.Name())
 		}
 	}
-	// Every other directory holds a request processing plugin, which has no
-	// task part.
-	allKeys := slices.Concat(expectedKeys, slices.Collect(maps.Keys(requestPluginHooks)))
+	// Include the account-pool provider, which uses relay routes without tasks.
+	allKeys := slices.Concat(expectedKeys, []string{"gpt-account-pool"}, slices.Collect(maps.Keys(requestPluginHooks)))
 	slices.Sort(allKeys)
 	assert.Equal(t, allKeys, actualKeys)
 

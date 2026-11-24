@@ -13,6 +13,8 @@ import (
 var userUsableGroups = map[string]string{
 	"default": "Default group",
 	"vip":     "VIP group",
+	"plus":    "Plus account group",
+	"pro":     "Pro account group",
 }
 var userUsableGroupsMutex sync.RWMutex
 

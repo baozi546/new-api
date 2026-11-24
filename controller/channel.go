@@ -1304,6 +1304,16 @@ func UpdateChannel(c *gin.Context) {
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
+	if service.IsProviderPool(originChannel) {
+		// Pool category and concurrency are edited only through the
+		// dedicated account pool API, never channel serialization.
+		channel.ChannelInfo.ProviderPoolCategory = originChannel.ChannelInfo.ProviderPoolCategory
+		channel.ChannelInfo.ProviderPoolConcurrency = originChannel.ChannelInfo.ProviderPoolConcurrency
+		if !service.ProviderPoolCategoryMatchesGroups(channel.ChannelInfo.ProviderPoolCategory, channel.GetGroups()) {
+			common.ApiErrorT(c, "Account type must match at least one customer group")
+			return
+		}
+	}
 
 	if channelHasSensitiveChanges(&channel, originChannel, requestData) &&
 		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {

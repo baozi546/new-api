@@ -65,7 +65,7 @@ func useProviderPluginDatabase(t *testing.T) *gorm.DB {
 		sqlDB.SetMaxOpenConns(1)
 	}
 	t.Cleanup(func() { _ = sqlDB.Close() })
-	tables := []any{&model.Channel{}, &model.Ability{}, &model.AuthFlow{}, &model.User{}}
+	tables := []any{&model.Channel{}, &model.Ability{}, &model.AuthFlow{}, &model.User{}, &model.SystemTask{}}
 	require.NoError(t, database.AutoMigrate(tables...))
 	t.Cleanup(func() { require.NoError(t, database.Migrator().DropTable(tables...)) })
 	var version string

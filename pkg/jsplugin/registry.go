@@ -86,6 +86,8 @@ func (t *LocalizedText) UnmarshalJSON(data []byte) error {
 }
 
 type Meta struct {
+	// AccountPool shares provider accounts across channels on the same base URL.
+	AccountPool          bool                        `json:"accountPool,omitempty"`
 	RequiredCapabilities []string                    `json:"requiredCapabilities,omitempty"`
 	SubmitResponseTypes  []string                    `json:"submitResponseTypes,omitempty"`
 	SortPriority         int                         `json:"sortPriority,omitempty"`
@@ -791,15 +793,18 @@ var taskOnlyMetaFields = []string{"routes", "protocols", "fetchMode", "submitRes
 
 // ProviderHooks are the optional credential, relay and channel exports of a
 // plugin.
-var ProviderHooks = []string{"login", "refresh", "revoke", "signRequest", "prepareRequest", "credentialRejected", "convertRequest", "convertResponse", "convertStreamEvent", "exchangeKey", "checkKey", "buildBalanceRequest", "parseBalance", "scheduled"}
+var ProviderHooks = []string{"login", "refresh", "revoke", "signRequest", "prepareRequest", "credentialRejected", "convertRequest", "convertResponse", "convertStreamEvent", "exchangeKey", "checkKey", "buildBalanceRequest", "parseBalance", "scheduled", "importCredential", "describeAccount"}
 
 var providerConvertHooks = []string{"convertRequest", "convertResponse", "convertStreamEvent"}
 
 // relayOnlyHooks act on relay requests, so only a plugin with meta.relay may
 // export them. The credential hooks serve the task part as well.
-var relayOnlyHooks = []string{"prepareRequest", "credentialRejected", "convertRequest", "convertResponse", "convertStreamEvent"}
+var relayOnlyHooks = []string{"prepareRequest", "credentialRejected", "convertRequest", "convertResponse", "convertStreamEvent", "importCredential", "describeAccount"}
 
 func validateProviderHooks(meta Meta, engine *Engine) error {
+	if meta.AccountPool && (!meta.HasProviderPart() || !engine.HasExport("describeAccount") || !engine.HasExport("login")) {
+		return fmt.Errorf("plugin %s accountPool requires relay routes, login and describeAccount", meta.Key)
+	}
 	exported := make(map[string]bool, len(ProviderHooks))
 	for _, hook := range ProviderHooks {
 		if !engine.HasExport(hook) {
@@ -1380,12 +1385,19 @@ func decodeMeta(value any) (Meta, error) {
 	}
 	for field := range object {
 		switch field {
-		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions", "relay", "configSchema", "optional", "scope", "samples", "channelConfig", "keyHint":
+		case "requiredCapabilities", "submitResponseTypes", "sortPriority", "website", "apiVersion", "key", "name", "icon", "description", "version", "author", "baseUrl", "channelTypes", "channelType", "compatibleChannelTypes", "models", "fetchMode", "allowedHosts", "upstreams", "routes", "protocols", "usageSchema", "usageExamples", "usageProfiles", "auth", "endpoints", "submitPaths", "actions", "relay", "configSchema", "optional", "scope", "samples", "channelConfig", "keyHint", "accountPool":
 		default:
 			return Meta{}, &UnknownMetaFieldError{Field: field}
 		}
 	}
 	meta := Meta{}
+	if value, present := object["accountPool"]; present {
+		enabled, ok := value.(bool)
+		if !ok {
+			return Meta{}, fmt.Errorf("plugin meta accountPool must be a boolean")
+		}
+		meta.AccountPool = enabled
+	}
 	var err error
 	meta.APIVersion, err = integerMetaField(object, "apiVersion")
 	if err != nil {

@@ -47,6 +47,7 @@ import {
 const FORM_ID = 'plugin-login-form'
 
 type PluginLoginDialogProps = {
+  pool?: boolean
   open: boolean
   onOpenChange: (open: boolean) => void
   channelId: number
@@ -61,6 +62,7 @@ type PluginLoginDialogProps = {
 export function PluginLoginDialog(props: PluginLoginDialogProps) {
   const { t, i18n } = useTranslation()
   const login = usePluginLogin({
+    pool: props.pool,
     channelId: props.channelId,
     keyIndex: props.keyIndex,
     add: props.add,
