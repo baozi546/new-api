@@ -22,6 +22,9 @@ func TestCPAAccountsRedactManagementResponse(t *testing.T) {
 	if err != nil || len(rows) != 1 || rows[0].Pool != "plus" || *rows[0].Limit != 2 {
 		t.Fatalf("unexpected list %v %v", rows, err)
 	}
+	if rows[0].ChannelPoolID != CPASharedPoolID {
+		t.Fatal("accounts uploaded directly to CPA must belong to the automatic shared pool")
+	}
 	raw, _ := json.Marshal(rows)
 	if strings.Contains(string(raw), "private-marker") {
 		t.Fatal("private upstream metadata escaped")

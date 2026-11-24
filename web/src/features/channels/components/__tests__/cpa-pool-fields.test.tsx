@@ -4,27 +4,17 @@ import { expect, test, vi } from 'vitest'
 
 import { CPAPoolFields } from '../cpa-pool-fields'
 
-test('editing a channel can select an existing shared pool and the actual Pro category', async () => {
+test('channels share CPA accounts automatically and can select the actual Pro category', async () => {
   const user = userEvent.setup()
-  const onPoolChange = vi.fn()
   const onCategoryChange = vi.fn()
   const view = render(
-    <CPAPoolFields
-      pools={[{ id: 2, name: 'Plus channel', pool: 'shared' }]}
-      pool='own'
-      category=''
-      onPoolChange={onPoolChange}
-      onCategoryChange={onCategoryChange}
-    />
+    <CPAPoolFields category='' onCategoryChange={onCategoryChange} />
   )
   try {
-    await user.click(screen.getByRole('combobox', { name: 'CPA channel pool' }))
-    await user.click(
-      await screen.findByRole('option', {
-        name: /Share pool with Plus channel/,
-      })
-    )
-    expect(onPoolChange).toHaveBeenCalledWith('shared')
+    expect(screen.getAllByRole('combobox')).toHaveLength(1)
+    expect(
+      screen.getByText('Accounts at this CPA address are shared automatically.')
+    ).toBeVisible()
     await user.click(
       screen.getByRole('combobox', { name: 'Route accounts by category' })
     )
@@ -37,14 +27,7 @@ test('editing a channel can select an existing shared pool and the actual Pro ca
 
 test('pool controls cannot be changed when the channel is locked', () => {
   const view = render(
-    <CPAPoolFields
-      pools={[]}
-      pool=''
-      category=''
-      disabled
-      onPoolChange={vi.fn()}
-      onCategoryChange={vi.fn()}
-    />
+    <CPAPoolFields category='' disabled onCategoryChange={vi.fn()} />
   )
   try {
     for (const field of screen.getAllByRole('combobox')) {

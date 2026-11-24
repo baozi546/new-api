@@ -8,55 +8,16 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 
-import type { Binding } from '../lib/cpa-channel-pools'
-
 type Props = {
-  pools: Binding[]
-  pool: string
   category: string
   disabled?: boolean
-  onPoolChange: (value: string) => void
   onCategoryChange: (value: string) => void
 }
 
 export function CPAPoolFields(props: Props) {
   const { t } = useTranslation()
-  const pools = [
-    ...new Map(
-      props.pools
-        .filter((channel) => channel.pool)
-        .map((channel) => [channel.pool, channel])
-    ).values(),
-  ]
   return (
     <div className='grid gap-3 rounded-lg border p-4 sm:grid-cols-2'>
-      <div className='space-y-2'>
-        <label id='cpa-pool-label' className='text-sm font-medium'>
-          {t('CPA channel pool')}
-        </label>
-        <Select
-          value={props.pool || '__new__'}
-          disabled={props.disabled}
-          onValueChange={(value) => {
-            if (value) props.onPoolChange(value === '__new__' ? '' : value)
-          }}
-        >
-          <SelectTrigger aria-labelledby='cpa-pool-label'>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value='__new__'>
-              {t('Create a dedicated pool')}
-            </SelectItem>
-            {pools.map((channel) => (
-              <SelectItem key={channel.pool} value={channel.pool}>
-                {t('Share pool with {{channel}}', { channel: channel.name })} (#
-                {channel.id})
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
       <div className='space-y-2'>
         <label id='cpa-category-label' className='text-sm font-medium'>
           {t('Route accounts by category')}
@@ -83,9 +44,7 @@ export function CPAPoolFields(props: Props) {
         </Select>
       </div>
       <p className='text-muted-foreground text-xs sm:col-span-2'>
-        {t(
-          'Channels sharing a pool use the same accounts. Each channel calls only its selected account category.'
-        )}
+        {t('Accounts at this CPA address are shared automatically.')}
       </p>
     </div>
   )

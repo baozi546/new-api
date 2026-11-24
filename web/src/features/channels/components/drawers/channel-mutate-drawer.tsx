@@ -201,7 +201,11 @@ import {
   supportsNewAPIUpstream,
 } from '../../lib/channel-plugin-extensions'
 import { getChannelTypeConfig } from '../../lib/channel-type-config'
-import { isCPARelayURL, useCPABindings } from '../../lib/cpa-channel-pools'
+import {
+  CPA_SHARED_POOL_ID,
+  isCPARelayURL,
+  useCPABindings,
+} from '../../lib/cpa-channel-pools'
 import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
@@ -652,19 +656,14 @@ export function ChannelMutateDrawer({
     : defaultBaseURLs?.[currentType] || t(FIELD_PLACEHOLDERS.BASE_URL)
   const currentStatus = formValues.status
   const currentBaseUrl = formValues.base_url
-  const [sharedCPAPool, setSharedCPAPool] = useState<string | undefined>()
   const [cpaAccountPool, setCPAAccountPool] = useState<string | undefined>()
   const cpaBindings = useCPABindings(
     open && (currentUser?.role ?? 0) >= ROLE.ADMIN
   )
-  const defaultCPAPool = isEditing
-    ? channelData?.data?.cpa_pool_id || ''
-    : cpaBindings.data?.channels.find((channel) => channel.pool)?.pool || ''
   const configuringCPA =
     currentType === 1 &&
     isCPARelayURL(currentBaseUrl || '', cpaBindings.data?.endpoints || [])
   useEffect(() => {
-    setSharedCPAPool(undefined)
     setCPAAccountPool(undefined)
   }, [open, currentRow?.id])
   const currentTaskPluginKey = formValues.task_plugin_key
@@ -1728,9 +1727,7 @@ export function ChannelMutateDrawer({
   }, [])
 
   const channelMutation = useChannelMutateForm({
-    sharedCPAPool: configuringCPA
-      ? (sharedCPAPool ?? (!isEditing ? defaultCPAPool : undefined))
-      : undefined,
+    sharedCPAPool: configuringCPA ? CPA_SHARED_POOL_ID : undefined,
     cpaAccountPool: configuringCPA
       ? (cpaAccountPool ?? channelData?.data?.cpa_account_pool ?? '')
       : undefined,
@@ -3765,13 +3762,10 @@ export function ChannelMutateDrawer({
       <ChannelApiAccessSection>
         {configuringCPA && (
           <CPAPoolFields
-            pools={cpaBindings.data?.channels || []}
-            pool={sharedCPAPool ?? defaultCPAPool}
             category={
               cpaAccountPool ?? channelData?.data?.cpa_account_pool ?? ''
             }
             disabled={!canEditSensitive || isSubmitting}
-            onPoolChange={setSharedCPAPool}
             onCategoryChange={setCPAAccountPool}
           />
         )}

@@ -27,12 +27,10 @@ func provisionCPAChannel(ctx context.Context, ch *model.Channel, share string) e
 		}
 		return nil
 	}
-	id := share
-	if id == "" {
-		id = common.GetUUID()
-	} else {
+	id := service.CPASharedPoolID
+	if share != "" && share != id {
 		var sources []model.Channel
-		if err := model.DB.WithContext(ctx).Select("type", "base_url").Where("cpa_pool_id = ?", id).Find(&sources).Error; err != nil {
+		if err := model.DB.WithContext(ctx).Select("type", "base_url").Where("cpa_pool_id = ?", share).Find(&sources).Error; err != nil {
 			return err
 		}
 		if !slices.ContainsFunc(sources, func(source model.Channel) bool { return matchesCPAChannel(&source) }) {

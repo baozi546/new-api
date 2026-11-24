@@ -15,6 +15,9 @@ import (
 	"github.com/QuantumNous/new-api/common"
 )
 
+// CPASharedPoolID is scoped to the configured CPA service, including its relay aliases.
+const CPASharedPoolID = "00000000000000000000000000000000"
+
 type CPACheck struct {
 	Time        int64  `json:"time"`
 	Question    string `json:"question"`
@@ -131,6 +134,7 @@ func ListCPAAccounts(ctx context.Context) ([]CPAAccount, error) {
 			continue
 		}
 		a := row.CPAAccount
+		a.ChannelPoolID = CPASharedPoolID
 		if a.Pool == "" {
 			switch strings.ToLower(row.Claim.Plan) {
 			case "plus", "pro":

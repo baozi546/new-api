@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 
 const route = '/api/cpa/accounts'
+export const CPA_SHARED_POOL_ID = '00000000000000000000000000000000'
 export async function request<T>(
   method: 'GET' | 'PATCH' | 'POST',
   path = '',

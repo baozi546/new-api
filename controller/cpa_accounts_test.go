@@ -135,7 +135,7 @@ func TestCPAChannelCreateShareRenameAndLogin(t *testing.T) {
 	b, err := model.GetChannelById(2, true)
 	require.NoError(t, err)
 	require.Len(t, a.CPAPoolID, 32)
-	require.NotEqual(t, a.CPAPoolID, b.CPAPoolID)
+	require.Equal(t, a.CPAPoolID, b.CPAPoolID)
 	require.Equal(t, server.URL+"/channel-pools/"+a.CPAPoolID, a.GetBaseURL())
 	require.True(t, create(a.CPAPoolID).Success)
 	shared, err := model.GetChannelById(3, true)
