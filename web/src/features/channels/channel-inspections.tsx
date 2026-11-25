@@ -92,7 +92,7 @@ function Editor({
     try {
       await requestInspection(
         'POST',
-        `/inspections/${row.id}${run ? '/run' : ''}`,
+        `/${row.id}${run ? '/run' : ''}`,
         run ? {} : draft
       )
       setMessage(t(run ? 'Inspection started' : 'Saved'))
