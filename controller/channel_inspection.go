@@ -1,12 +1,9 @@
 package controller
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -53,14 +50,7 @@ type inspectionRound struct {
 var inspecting sync.Map
 
 func inspectionKey(c *model.Channel, kind string) string {
-	if service.IsProviderPool(c) {
-		return fmt.Sprintf("ProviderInspection/%d/%s", c.Id, kind)
-	}
-	pool := c.CPAPoolID
-	if kind == "last" {
-		pool += c.CPAAccountPath()
-	}
-	return fmt.Sprintf("CPAInspection/%d/%s/%s", c.Id, pool, kind)
+	return fmt.Sprintf("ProviderInspection/%d/%s", c.Id, kind)
 }
 func readInspection(c *model.Channel, kind string, dst any) {
 	common.OptionMapRWMutex.RLock()
@@ -91,10 +81,10 @@ func (cfg inspectionConfig) valid() bool {
 }
 func inspectionChannels() ([]model.Channel, error) {
 	var all []model.Channel
-	err := model.DB.Where("cpa_pool_id <> ? OR type = ?", "", constant.ChannelTypeTaskPlugin).Order("id").Find(&all).Error
+	err := model.DB.Where("type = ?", constant.ChannelTypeTaskPlugin).Order("id").Find(&all).Error
 	result := all[:0]
 	for _, ch := range all {
-		if matchesCPAChannel(&ch) || service.IsProviderPool(&ch) {
+		if service.IsProviderPool(&ch) {
 			result = append(result, ch)
 		}
 	}
@@ -104,7 +94,7 @@ func inspectionTarget(c *gin.Context) *model.Channel {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err == nil && id > 0 {
 		ch, err := model.GetChannelById(id, true)
-		if err == nil && (ch.CPAPoolID != "" && matchesCPAChannel(ch) || service.IsProviderPool(ch)) {
+		if err == nil && service.IsProviderPool(ch) {
 			return ch
 		}
 	}
@@ -219,69 +209,7 @@ func launchInspection(ch model.Channel, cfg inspectionConfig) bool {
 	return true
 }
 func inspectChannel(ch model.Channel, cfg inspectionConfig) error {
-	if service.IsProviderPool(&ch) {
-		return inspectProviderPoolChannel(ch, cfg)
-	}
-	var prev inspectionRound
-	readInspection(&ch, "last", &prev)
-	round := inspectionRound{Sequence: prev.Sequence + 1, Accounts: []accountMark{}}
-	if !cfg.valid() || cfg.Model == "" {
-		return errors.New("invalid inspection settings")
-	}
-	index := prev.Sequence % len(cfg.Questions)
-	q := cfg.Questions[index]
-	ctx := context.Background()
-	accounts, err := service.ListCPAAccounts(ctx)
-	if err != nil {
-		round = prev
-		round.Failed = true
-	} else {
-		round.Prompt = q.Prompt
-		round.Model = cfg.Model
-		for _, a := range accounts {
-			if a.ChannelPoolID != ch.CPAPoolID || (ch.CPAAccountCategory() != "" && a.Pool != ch.CPAAccountCategory()) {
-				continue
-			}
-			mark := accountMark{ID: a.ID, Label: a.Label, Result: "disabled"}
-			if a.Disabled && (a.Check.Result == "account_banned" || a.Check.Result == "login_required") {
-				mark.Result = a.Check.Result
-				mark.Time = a.Check.Time
-			}
-			if mark.Label == "" {
-				mark.Label = a.ID
-			}
-			if !a.Disabled {
-				mark.Number = index + 1
-				var reply struct {
-					Check service.CPACheck `json:"check"`
-				}
-				release, err := service.AcquireChannelSlot(ctx, ch.Id)
-				if err != nil {
-					return err
-				}
-				func() {
-					defer release()
-					err = service.CallCPAManagement(ctx, "POST", "credentials/quality-check", map[string]string{"name": a.ID, "channel_pool_id": ch.CPAPoolID, "model": cfg.Model, "question": q.Prompt, "answer": q.Answer}, &reply)
-				}()
-				mark.Time = time.Now().Unix()
-				mark.Result = "inconclusive"
-				if err == nil && reply.Check.Question == strings.TrimSpace(q.Prompt) {
-					switch reply.Check.Result {
-					case "passed", "wrong_answer", "rate_limited", "login_required", "account_banned", "inconclusive":
-						mark.Result = reply.Check.Result
-					}
-				}
-			}
-			round.Accounts = append(round.Accounts, mark)
-		}
-		sort.Slice(round.Accounts, func(i, j int) bool { return round.Accounts[i].ID < round.Accounts[j].ID })
-	}
-	round.Time = time.Now().Unix()
-	raw, err := common.Marshal(round)
-	if err != nil {
-		return err
-	}
-	return model.UpdateOptionsBulk(map[string]string{inspectionKey(&ch, "last"): string(raw)})
+	return inspectProviderPoolChannel(ch, cfg)
 }
 func StartChannelInspectionSchedule() {
 	go func() {

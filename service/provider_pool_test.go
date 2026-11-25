@@ -41,17 +41,17 @@ func createProviderPoolTestChannel(t *testing.T, pluginKey, baseURL, name, categ
 	return channel
 }
 
-func TestProviderPoolSharesAndPinsVerifiedAccount(t *testing.T) {
+func TestProviderPoolAccountsStayAssignedToTheirChannelAndMatchCustomerGroup(t *testing.T) {
 	useProviderPluginDatabase(t)
 	pluginKey := registerProviderPoolTestPlugin(t)
 	line, err := (jsplugin.Credential{
-		Plugin: pluginKey, AccountID: "shared-account", Label: "pro@example.test",
+		Plugin: pluginKey, AccountID: "assigned-account", Label: "[REDACTED]",
 		Data: []byte("{\"access_token\":\"secret-account-token\"}"),
 	}).Line()
 	require.NoError(t, err)
 	owner := createProviderPoolTestChannel(t, pluginKey, "https://upstream.example/v1", "Pro owner", "pro", 2, line)
 	owner.ChannelInfo.ProviderAccounts = map[string]model.ProviderAccountState{
-		"shared-account": {Profile: jsplugin.AccountProfile{
+		"assigned-account": {Profile: jsplugin.AccountProfile{
 			Plan: "pro", Category: "pro", PlanVerified: true, Windows: []jsplugin.BalanceWindow{},
 		}},
 	}
@@ -60,25 +60,136 @@ func TestProviderPoolSharesAndPinsVerifiedAccount(t *testing.T) {
 	plus := createProviderPoolTestChannel(t, pluginKey, "https://upstream.example", "Plus customer channel", "plus", 4, "")
 	model.InitChannelCache()
 
-	accounts, err := ListProviderPoolAccounts(context.Background(), consumer)
+	accounts, err := ListProviderPoolAccounts(context.Background(), owner)
 	require.NoError(t, err)
 	require.Len(t, accounts, 1)
 	require.Equal(t, owner.Id, accounts[0].OwnerID)
-	require.Equal(t, []int{owner.Id, consumer.Id, plus.Id}, []int{accounts[0].Channels[0].ID, accounts[0].Channels[1].ID, accounts[0].Channels[2].ID})
+	require.Equal(t, owner.Id, accounts[0].Channels[0].ID)
 	require.Equal(t, 2, ProviderPoolAccountLimit(accounts[0]))
+	accounts, err = ListProviderPoolAccounts(context.Background(), consumer)
+	require.NoError(t, err)
+	require.Empty(t, accounts)
 
 	gin.SetMode(gin.TestMode)
-	recorder := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(recorder)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	key, index, err := SelectProviderPoolAccount(c, consumer)
+	c.Set("group", "pro")
+	key, index, err := SelectProviderPoolAccount(c, owner)
 	require.NoError(t, err)
 	require.Equal(t, line, key)
 	require.Equal(t, 0, index)
 	require.Equal(t, owner.Id, c.GetInt("provider_pool_owner_id"))
 
+	_, _, err = SelectProviderPoolAccount(c, consumer)
+	require.ErrorContains(t, err, "no available account")
+	c.Set("group", "plus")
+	_, _, err = SelectProviderPoolAccount(c, owner)
+	require.ErrorContains(t, err, "no available account")
 	_, _, err = SelectProviderPoolAccount(c, plus)
 	require.ErrorContains(t, err, "no available account")
+}
+func TestProviderPoolKeepsLegacySubscriptionSelectionForCustomGroups(t *testing.T) {
+	useProviderPluginDatabase(t)
+	pluginKey := registerProviderPoolTestPlugin(t)
+	line, err := (jsplugin.Credential{
+		Plugin: pluginKey, AccountID: "legacy-pro-account",
+		Data: []byte(`{"access_token":"legacy-token"}`),
+	}).Line()
+	require.NoError(t, err)
+	channel := createProviderPoolTestChannel(t, pluginKey, "https://upstream.example", "Legacy SVIP channel", "svip", 1, line)
+	channel.ChannelInfo.ProviderPoolCategory = "pro"
+	channel.ChannelInfo.ProviderAccounts = map[string]model.ProviderAccountState{
+		"legacy-pro-account": {Profile: jsplugin.AccountProfile{Plan: "pro", Category: "pro", PlanVerified: true}},
+	}
+	require.NoError(t, model.DB.Model(channel).Update("channel_info", channel.ChannelInfo).Error)
+	model.InitChannelCache()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	c.Set("group", "svip")
+	_, _, err = SelectProviderPoolAccount(c, channel)
+	require.NoError(t, err)
+	c.Set("group", "plus")
+	_, _, err = SelectProviderPoolAccount(c, channel)
+	require.ErrorContains(t, err, "no available account")
+}
+
+func TestProviderPoolTransferMovesCredentialAndPreservesQuotaState(t *testing.T) {
+	useProviderPluginDatabase(t)
+	pluginKey := registerProviderPoolTestPlugin(t)
+	line, err := (jsplugin.Credential{
+		Plugin: pluginKey, AccountID: "transfer-account", Label: "transfer@example.com",
+		Data: []byte(`{"access_token":"secret-transfer-token"}`),
+	}).Line()
+	require.NoError(t, err)
+	source := createProviderPoolTestChannel(t, pluginKey, "https://upstream.example", "Plus source", "plus,pro", 2, line)
+	source.ChannelInfo.ProviderAccounts = map[string]model.ProviderAccountState{
+		"transfer-account": {
+			Disabled: true,
+			Health: "wrong_answer",
+			CheckedAt: 123,
+			WrongAnswers: 2,
+			Profile: jsplugin.AccountProfile{
+				Plan: "pro", Category: "pro", PlanVerified: true,
+				QuotaCheckedAt: 122,
+				Windows: []jsplugin.BalanceWindow{{Name: map[string]string{"en": "5h"}, Used: 25, Limit: 100, Unit: "%", ResetAt: 999}},
+			},
+		},
+	}
+	require.NoError(t, model.DB.Model(source).Update("channel_info", source.ChannelInfo).Error)
+	target := createProviderPoolTestChannel(t, pluginKey, "https://upstream.example", "Pro target", "plus,pro", 3, "")
+	model.InitChannelCache()
+
+	require.NoError(t, TransferProviderPoolAccount(source.Id, target.Id, "transfer-account"))
+	source, err = model.GetChannelById(source.Id, true)
+	require.NoError(t, err)
+	target, err = model.GetChannelById(target.Id, true)
+	require.NoError(t, err)
+	sourceAccounts, err := ListProviderPoolAccounts(context.Background(), source)
+	require.NoError(t, err)
+	require.Empty(t, sourceAccounts)
+	targetAccounts, err := ListProviderPoolAccounts(context.Background(), target)
+	require.NoError(t, err)
+	require.Len(t, targetAccounts, 1)
+	account := targetAccounts[0]
+	require.Equal(t, target.Id, account.OwnerID)
+	require.Equal(t, line, account.Line)
+	require.True(t, account.State.Disabled)
+	require.Equal(t, "wrong_answer", account.State.Health)
+	require.Equal(t, 2, account.State.WrongAnswers)
+	require.Equal(t, int64(122), account.Profile.QuotaCheckedAt)
+	require.Equal(t, 25.0, account.Profile.Windows[0].Used)
+
+	storedSource, err := model.GetChannelById(source.Id, true)
+	require.NoError(t, err)
+	storedTarget, err := model.GetChannelById(target.Id, true)
+	require.NoError(t, err)
+	require.Empty(t, storedSource.ChannelInfo.ProviderAccounts)
+	targetState, ok := storedTarget.ChannelInfo.ProviderAccounts["transfer-account"]
+	require.True(t, ok)
+	require.True(t, targetState.Disabled)
+	require.Equal(t, "wrong_answer", targetState.Health)
+	require.Equal(t, int64(122), targetState.Profile.QuotaCheckedAt)
+	require.Empty(t, storedSource.Key)
+	require.Equal(t, line, storedTarget.Key)
+}
+
+func TestMergeChannelModelsAddsDiscoveredModelsAndAbilities(t *testing.T) {
+	useProviderPluginDatabase(t)
+	pluginKey := registerProviderPoolTestPlugin(t)
+	channel := createProviderPoolTestChannel(t, pluginKey, "https://upstream.example", "Pool", "plus,pro", 1, "")
+	changed, err := model.MergeChannelModels(channel.Id, []string{" model-a ", "model-b", "model-a", "bad,model", strings.Repeat("x", 256)})
+	require.NoError(t, err)
+	require.True(t, changed)
+	stored, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{"provider-model", "model-a", "model-b"}, stored.GetModels())
+	var abilities []model.Ability
+	require.NoError(t, model.DB.Where("channel_id = ? AND model IN ?", channel.Id, []string{"model-a", "model-b"}).Order("group").Find(&abilities).Error)
+	require.Len(t, abilities, 4)
+
+	changed, err = model.MergeChannelModels(channel.Id, []string{"model-a", "model-b"})
+	require.NoError(t, err)
+	require.False(t, changed)
 }
 
 func TestProviderPoolDisabledAccountIsExcludedAndCanBeRemoved(t *testing.T) {
@@ -112,7 +223,7 @@ func TestProviderPoolDisabledAccountIsExcludedAndCanBeRemoved(t *testing.T) {
 	require.NotContains(t, stored.ChannelInfo.ProviderAccounts, "disabled-account")
 }
 
-func TestProviderPoolSettingsMovesCustomerGroupWithoutChangingAccounts(t *testing.T) {
+func TestProviderPoolSettingsOnlyChangesConcurrency(t *testing.T) {
 	useProviderPluginDatabase(t)
 	pluginKey := registerProviderPoolTestPlugin(t)
 	line, err := (jsplugin.Credential{
@@ -129,11 +240,11 @@ func TestProviderPoolSettingsMovesCustomerGroupWithoutChangingAccounts(t *testin
 		"group": channel.Group, "channel_info": channel.ChannelInfo,
 	}).Error)
 
-	require.NoError(t, model.UpdateProviderPoolSettings(channel.Id, "pro", 3))
+	require.NoError(t, model.UpdateProviderPoolSettings(channel.Id, 3))
 	stored, err := model.GetChannelById(channel.Id, true)
 	require.NoError(t, err)
-	require.Equal(t, "svip,pro", stored.Group)
-	require.Equal(t, "pro", stored.ChannelInfo.ProviderPoolCategory)
+	require.Equal(t, "svip,plus", stored.Group)
+	require.Equal(t, "plus", stored.ChannelInfo.ProviderPoolCategory)
 	require.Equal(t, 3, stored.ChannelInfo.ProviderPoolConcurrency)
 	require.Equal(t, line, stored.Key)
 	require.Equal(t, channel.ChannelInfo.ProviderAccounts, stored.ChannelInfo.ProviderAccounts)

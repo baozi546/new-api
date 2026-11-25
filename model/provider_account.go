@@ -1,8 +1,6 @@
 package model
 
 import (
-	"slices"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -21,9 +19,9 @@ type ProviderAccountState struct {
 	Profile      jsplugin.AccountProfile `json:"profile"`
 }
 
-// UpdateProviderPoolSettings changes the account filter and its customer-group
-// abilities together, preserving credentials and custom groups.
-func UpdateProviderPoolSettings(channelID int, category string, concurrency int) error {
+// UpdateProviderPoolSettings changes the per-account concurrency cap without
+// changing channel customer groups or the account assignments.
+func UpdateProviderPoolSettings(channelID int, concurrency int) error {
 	pollingLock := GetChannelPollingLock(channelID)
 	pollingLock.Lock()
 	defer pollingLock.Unlock()
@@ -37,20 +35,8 @@ func UpdateProviderPoolSettings(channelID int, category string, concurrency int)
 		if err := lockForUpdate(tx).Where("id = ? AND type = ?", channelID, constant.ChannelTypeTaskPlugin).First(&channel).Error; err != nil {
 			return err
 		}
-		if category != "unknown" {
-			groups := slices.DeleteFunc(channel.GetGroups(), func(group string) bool {
-				return slices.Contains([]string{"plus", "pro", "degraded"}, strings.ToLower(strings.TrimSpace(group)))
-			})
-			channel.Group = strings.Join(append(groups, category), ",")
-		}
-		channel.ChannelInfo.ProviderPoolCategory = category
 		channel.ChannelInfo.ProviderPoolConcurrency = concurrency
-		if err := tx.Model(&channel).Updates(map[string]any{
-			"group": channel.Group, "channel_info": channel.ChannelInfo,
-		}).Error; err != nil {
-			return err
-		}
-		return channel.UpdateAbilities(tx)
+		return tx.Model(&channel).Update("channel_info", channel.ChannelInfo).Error
 	})
 	if err == nil {
 		BumpSyncTopic(SyncTopicChannels)

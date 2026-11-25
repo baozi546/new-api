@@ -3,7 +3,6 @@ import type { LocalizedTextValue } from '@/lib/localized-text'
 import { requireServerSuccess } from '@/lib/server-error-message'
 
 export type PoolSettings = {
-  category: 'plus' | 'pro' | 'degraded' | 'unknown'
   concurrency: number
 }
 export type PoolChannel = {
@@ -77,7 +76,12 @@ export async function saveProviderPool(
 export async function importPoolAccount(
   id: number,
   account: Record<string, unknown>
-): Promise<{ status: string; quota_error?: string }> {
+): Promise<{
+  status: string
+  quota_error?: string
+  models_error?: string
+  models_updated?: number
+}> {
   const response = await api.post(`/api/channel/${id}/account_pool/import`, {
     account,
   })
@@ -87,11 +91,12 @@ export async function importPoolAccount(
 export async function operatePoolAccount(
   id: number,
   accountId: string,
-  action: string
+  action: string,
+  targetChannelId?: number
 ): Promise<void> {
   const response = await api.post(
     `/api/channel/${id}/account_pool/accounts/${encodeURIComponent(accountId)}`,
-    { action }
+    { action, target_channel_id: targetChannelId }
   )
   requireServerSuccess(response.data)
 }
@@ -99,8 +104,6 @@ export async function operatePoolAccount(
 export async function createPoolChannel(input: {
   plugin: string
   name: string
-  groups: string[]
-  models: string[]
   settings: PoolSettings
 }): Promise<{ id: number }> {
   const response = await api.post('/api/channel/account_pools', input)

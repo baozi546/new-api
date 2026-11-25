@@ -26,9 +26,9 @@ function CustomerGroupSummary() {
   )
 }
 
-test('saving the account type refreshes the customer group shown for the channel', async () => {
+test('saving the channel account concurrency keeps customer groups intact', async () => {
   const user = userEvent.setup()
-  let group = 'plus'
+  let group = 'plus,pro'
   vi.spyOn(api, 'get').mockImplementation(async () => ({
     data: {
       success: true,
@@ -37,8 +37,8 @@ test('saving the account type refreshes the customer group shown for the channel
           {
             id: 7,
             name: 'Subscriptions',
-            groups: [group],
-            models: ['pool-model'],
+            groups: group.split(','),
+            models: [],
             plugin: { key: 'gpt-account-pool', name: 'GPT account pool' },
           },
         ],
@@ -47,7 +47,7 @@ test('saving the account type refreshes the customer group shown for the channel
     },
   }))
   const save = vi.spyOn(api, 'put').mockImplementation(async () => {
-    group = 'pro'
+    group = 'plus,pro'
     return { data: { success: true } }
   })
   const client = new QueryClient({
@@ -57,7 +57,7 @@ test('saving the account type refreshes the customer group shown for the channel
     <QueryClientProvider client={client}>
       <ProviderPoolSettings
         channelId={7}
-        settings={{ category: 'plus', concurrency: 1 }}
+        settings={{ concurrency: 1 }}
         disabled={false}
       />
       <CustomerGroupSummary />
@@ -65,24 +65,32 @@ test('saving the account type refreshes the customer group shown for the channel
   )
   try {
     await waitFor(() =>
-      expect(screen.getByLabelText('Customer groups')).toHaveTextContent('plus')
+      expect(screen.getByLabelText('Customer groups')).toHaveTextContent(
+        'plus,pro'
+      )
     )
-    await user.click(
-      screen.getByRole('combobox', {
-        name: 'Account type used by this channel',
-      })
+    await user.clear(
+      screen.getByRole('spinbutton', { name: 'Concurrency per account' })
     )
-    await user.click(await screen.findByRole('option', { name: 'Pro' }))
+    await user.type(
+      screen.getByRole('spinbutton', { name: 'Concurrency per account' }),
+      '3'
+    )
     await user.click(
       screen.getByRole('button', { name: 'Save account pool settings' })
     )
-    await waitFor(() =>
-      expect(screen.getByLabelText('Customer groups')).toHaveTextContent('pro')
-    )
+    await waitFor(() => expect(save).toHaveBeenCalled())
     expect(save).toHaveBeenCalledWith('/api/channel/7/account_pool', {
-      category: 'pro',
-      concurrency: 1,
+      concurrency: 3,
     })
+    expect(screen.getByLabelText('Customer groups')).toHaveTextContent(
+      'plus,pro'
+    )
+    expect(
+      screen.queryByRole('combobox', {
+        name: 'Account type used by this channel',
+      })
+    ).not.toBeInTheDocument()
   } finally {
     view.unmount()
     client.clear()
@@ -95,14 +103,11 @@ test('disabled account pool settings prevent changes and saving', () => {
     <QueryClientProvider client={client}>
       <ProviderPoolSettings
         channelId={7}
-        settings={{ category: 'plus', concurrency: 1 }}
+        settings={{ concurrency: 1 }}
         disabled
       />
     </QueryClientProvider>
   )
-  expect(
-    screen.getByRole('combobox', { name: 'Account type used by this channel' })
-  ).toBeDisabled()
   expect(
     screen.getByRole('spinbutton', { name: 'Concurrency per account' })
   ).toBeDisabled()

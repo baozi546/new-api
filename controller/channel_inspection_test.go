@@ -1,72 +1,86 @@
 package controller
 
 import (
-	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/service"
-	"github.com/stretchr/testify/require"
-	"net/http"
-	"net/http/httptest"
-	"strings"
+	"fmt"
 	"testing"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
+	"github.com/stretchr/testify/require"
 )
 
-func TestChannelInspectionScopesRoundsAndCustomerData(t *testing.T) {
-	setupTaskPluginBindChannelTest(t)
+func TestChannelInspectionsUseProviderPoolAndPublishSafeResults(t *testing.T) {
+	const pluginKey = "controller-inspection-pool"
+	setupProviderPluginControllerTest(t, pluginKey)
+	require.NoError(t, jsplugin.DefaultRegistry.Unregister(pluginKey))
+	registerProviderPoolImportPlugin(t, pluginKey)
 	require.NoError(t, model.DB.AutoMigrate(&model.Option{}, &model.SystemTask{}))
-	original := common.OptionMap
+
+	previousOptions := common.OptionMap
 	common.OptionMap = map[string]string{}
-	t.Cleanup(func() { common.OptionMap = original })
-	var prompts []string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v8/management/credentials":
-			_, _ = w.Write([]byte(`{"files":[{"provider":"codex","id":"private-account-id","label":"private@example.test","channel_pool_id":"first","account_pool":"plus"},{"provider":"codex","id":"other","channel_pool_id":"second","account_pool":"pro"},{"provider":"codex","id":"disabled","channel_pool_id":"first","account_pool":"plus","disabled":true}]}`))
-		case "/v8/management/credentials/quality-check":
-			var in map[string]string
-			require.NoError(t, common.DecodeJson(r.Body, &in))
-			require.Equal(t, "private-account-id", in["name"])
-			require.Equal(t, service.CPASharedPoolID, in["channel_pool_id"])
-			prompts = append(prompts, in["question"])
-			raw, _ := common.Marshal(map[string]any{"check": map[string]string{"result": "passed", "question": in["question"]}})
-			_, _ = w.Write(raw)
-		default:
-			t.Errorf("unexpected path %s", r.URL.Path)
-		}
-	}))
-	defer server.Close()
-	t.Setenv("CPA_MANAGEMENT_URL", server.URL)
-	t.Setenv("CPA_MANAGEMENT_TOKEN", "unit-credential")
-	plus := "plus"
-	ch := model.Channel{Id: 17, Type: 1, Name: "CPA Plus", Group: "svip,plus", Key: "example", BaseURL: &server.URL, CPAPoolID: service.CPASharedPoolID, CPAAccountPool: &plus}
-	require.NoError(t, model.DB.Create(&ch).Error)
-	other := model.Channel{Id: 19, Type: 1, Name: "Hidden", Key: "example", BaseURL: &server.URL, CPAPoolID: "second"}
-	require.NoError(t, model.DB.Create(&other).Error)
-	cfg := inspectionSettings(&ch)
-	cfg.Model = "probe-model"
-	cfg.Title = "Customer Plus"
+	t.Cleanup(func() { common.OptionMap = previousOptions })
+
+	channel := insertPluginChannel(t, pluginKey, "https://chatgpt.com", "", false)
+	channel.Name = "Pro account pool"
+	channel.Group = "pro"
+	channel.ChannelInfo.ProviderPoolCategory = "pro"
+	channel.ChannelInfo.ProviderPoolConcurrency = 2
+	require.NoError(t, model.DB.Model(channel).Updates(map[string]any{
+		"name": channel.Name, "group": channel.Group, "channel_info": channel.ChannelInfo,
+	}).Error)
+	model.InitChannelCache()
+
+	legacyCPA := &model.Channel{
+		Id: 19, Type: constant.ChannelTypeOpenAI, Name: "Legacy CPA", Key: "legacy-key",
+		Group: "pro", CPAPoolID: "legacy-pool",
+	}
+	require.NoError(t, model.DB.Create(legacyCPA).Error)
+
+	channels, err := inspectionChannels()
+	require.NoError(t, err)
+	require.Len(t, channels, 1)
+	require.Equal(t, channel.Id, channels[0].Id)
+	require.Equal(t, fmt.Sprintf("ProviderInspection/%d/settings", channel.Id), inspectionKey(channel, "settings"))
+
+	cfg := inspectionSettings(channel)
+	cfg.Model = "inspection-model"
+	cfg.Title = "Customer Pro"
 	cfg.Published = true
-	cfg.Questions = []inspectionQuestion{{"private prompt 1", "secret expected"}, {"private prompt 2", "example answer"}}
-	input, _ := common.Marshal(cfg)
-	reply, _ := callChannelAPI(t, SaveChannelInspection, "POST", "/", string(input), idParam(17))
-	require.True(t, reply.Success)
-	for range 2 {
-		require.NoError(t, inspectChannel(ch, inspectionSettings(&ch)))
+	cfg.Questions = []inspectionQuestion{{Prompt: "private prompt", Answer: "secret expected"}}
+	settings, err := common.Marshal(cfg)
+	require.NoError(t, err)
+	last, err := common.Marshal(inspectionRound{
+		Prompt: "private prompt",
+		Model:  "inspection-model",
+		Time:   100,
+		Accounts: []accountMark{{
+			ID: "private-account-id", Label: "private@example.test", Time: 100, Result: "passed", Number: 1,
+		}},
+	})
+	require.NoError(t, err)
+	common.OptionMap[inspectionKey(channel, "settings")] = string(settings)
+	common.OptionMap[inspectionKey(channel, "last")] = string(last)
+
+	customer := &model.User{
+		Id: 1, Username: "inspection-customer", Password: "test-only-password",
+		Group: "pro", Status: 1,
 	}
-	require.Equal(t, []string{"private prompt 1", "private prompt 2"}, prompts)
-	public, raw := callChannelAPI(t, CustomerChannelInspections, "GET", "/", "")
-	require.True(t, public.Success)
-	require.Contains(t, raw, "Customer Plus")
-	require.Contains(t, raw, "CPA Plus")
-	require.Contains(t, raw, `"groups":["svip","plus"]`)
-	require.Contains(t, raw, "passed")
-	require.Contains(t, raw, "disabled")
-	for _, bad := range []string{"private", "example.test", "secret expected", "Hidden", "probe-model", "first", "channel_pool_id", "settings"} {
-		require.False(t, strings.Contains(raw, bad), bad)
+	require.NoError(t, model.DB.Create(customer).Error)
+	public, publicJSON := callChannelAPI(t, CustomerChannelInspections, "GET", "/", "")
+	require.True(t, public.Success, publicJSON)
+	require.Contains(t, publicJSON, "Customer Pro")
+	require.Contains(t, publicJSON, `"groups":["pro"]`)
+	require.Contains(t, publicJSON, "passed")
+	for _, secret := range []string{"private-account-id", "private@example.test", "private prompt", "secret expected", "inspection-model", "Legacy CPA"} {
+		require.NotContains(t, publicJSON, secret)
 	}
-	admin, raw := callChannelAPI(t, ListChannelInspections, "GET", "/", "")
-	require.True(t, admin.Success)
-	require.Contains(t, raw, "private@example.test")
-	require.Contains(t, raw, "private prompt 2")
-	require.Contains(t, raw, "Hidden")
+
+	admin, adminJSON := callChannelAPI(t, ListChannelInspections, "GET", "/", "")
+	require.True(t, admin.Success, adminJSON)
+	require.Contains(t, adminJSON, "private@example.test")
+	require.Contains(t, adminJSON, "private prompt")
+	require.Contains(t, adminJSON, "Pro account pool")
+	require.NotContains(t, adminJSON, "Legacy CPA")
 }

@@ -31,7 +31,12 @@ import { UpstreamUpdateDialog } from './dialogs/upstream-update-dialog'
 import { ChannelMutateDrawer } from './drawers/channel-mutate-drawer'
 
 export function ChannelsDialogs() {
-  const { open, setOpen, currentRow, upstream } = useChannels()
+  const { open, setOpen, currentRow, setCurrentRow, upstream } = useChannels()
+
+  const closeChannelDrawer = () => {
+    setCurrentRow(null)
+    setOpen(null)
+  }
 
   return (
     <>
@@ -53,7 +58,7 @@ export function ChannelsDialogs() {
       {/* Channel Create/Update Drawer */}
       <ChannelMutateDrawer
         open={open === 'create-channel' || open === 'update-channel'}
-        onOpenChange={(v) => !v && setOpen(null)}
+        onOpenChange={(v) => !v && closeChannelDrawer()}
         currentRow={open === 'update-channel' ? currentRow : null}
       />
 

@@ -145,14 +145,10 @@ func acquireRedisProviderSlot(ctx context.Context, accountKey string, limit int)
 	}, nil
 }
 
-// A shared account obeys the strictest limit of channels eligible to use it.
+// ProviderPoolAccountLimit applies the configured channel-wide account cap.
 func ProviderPoolAccountLimit(account ProviderPoolAccount) int {
-	limit := 10000
-	for _, channel := range account.Channels {
-		settings := ProviderPoolSettings{Category: channel.Category, Concurrency: channel.Concurrency}
-		if ProviderAccountMatches(account, settings.Category) {
-			limit = min(limit, max(1, settings.Concurrency))
-		}
+	if account.Owner == nil {
+		return 1
 	}
-	return limit
+	return max(1, account.Owner.ChannelInfo.ProviderPoolConcurrency)
 }

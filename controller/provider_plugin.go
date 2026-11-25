@@ -59,10 +59,24 @@ func finishPluginLogin(c *gin.Context, result service.PluginLoginResult, data gi
 			account, findErr := service.FindProviderPoolAccount(c.Request.Context(), channel, credential.AccountID)
 			if findErr == nil {
 				go func() {
-					ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+					ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 					defer cancel()
 					if err := service.RefreshProviderPoolAccount(ctx, account); err != nil {
 						common.SysLog(common.LogText("provider account quota refresh failed after login: channel_id=%d category=%s", result.ChannelID, "provider_error"))
+					}
+					current, currentErr := model.GetChannelById(result.ChannelID, true)
+					if currentErr == nil && current.GetSetting().TaskPluginKey == "gpt-account-pool" {
+						currentAccount, findErr := service.FindProviderPoolAccount(ctx, current, credential.AccountID)
+						if findErr == nil {
+							models, discoverErr := service.FetchGPTAccountPoolModels(ctx, currentAccount)
+							if discoverErr == nil && len(models) > 0 {
+								if _, mergeErr := model.MergeChannelModels(result.ChannelID, models); mergeErr != nil {
+									common.SysLog(common.LogText("provider account model refresh failed after login: channel_id=%d category=%s", result.ChannelID, "provider_error"))
+								}
+							} else if discoverErr != nil {
+								common.SysLog(common.LogText("provider account model refresh failed after login: channel_id=%d category=%s", result.ChannelID, "provider_error"))
+							}
+						}
 					}
 					model.InitChannelCache()
 				}()

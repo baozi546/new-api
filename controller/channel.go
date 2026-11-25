@@ -774,7 +774,6 @@ func RefreshCodexChannelCredential(c *gin.Context) {
 }
 
 type AddChannelRequest struct {
-	ShareCPAPool              string                `json:"share_cpa_pool"`
 	Mode                      string                `json:"mode"`
 	MultiKeyMode              constant.MultiKeyMode `json:"multi_key_mode"`
 	BatchAddSetKeyPrefix2Name bool                  `json:"batch_add_set_key_prefix_2_name"`
@@ -935,12 +934,6 @@ func AddChannel(c *gin.Context) {
 		service.PluginLoginNeededStatus(addChannelRequest.Channel)
 		channels = append(channels, *addChannelRequest.Channel)
 		channelInputIndices = append(channelInputIndices, nil)
-	}
-	for i := range channels {
-		if err := provisionCPAChannel(c.Request.Context(), &channels[i], addChannelRequest.ShareCPAPool); err != nil {
-			common.ApiError(c, err)
-			return
-		}
 	}
 	err = model.BatchInsertChannels(channels)
 	if err != nil {
@@ -1205,7 +1198,6 @@ func DeleteChannelBatch(c *gin.Context) {
 
 type PatchChannel struct {
 	model.Channel
-	ShareCPAPool *string `json:"share_cpa_pool"`
 	MultiKeyMode *string `json:"multi_key_mode"`
 	KeyMode      *string `json:"key_mode"` // 多key模式下密钥覆盖或者追加
 }
@@ -1264,24 +1256,6 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	originProxy := originChannel.GetSetting().Proxy
-	if originChannel.CPAPoolID != "" && ((channel.BaseURL != nil && !matchesCPAChannel(&model.Channel{Type: originChannel.Type, BaseURL: channel.BaseURL})) || (channel.Type != 0 && channel.Type != originChannel.Type)) {
-		common.ApiErrorT(c, "Changing the endpoint of a bound CPA channel is not supported")
-		return
-	}
-	channel.CPAPoolID = originChannel.CPAPoolID
-	if _, provided := requestData["cpa_account_pool"]; !provided || channel.CPAAccountPool == nil {
-		channel.CPAAccountPool = originChannel.CPAAccountPool
-	}
-	category := channel.CPAAccountCategory()
-	if category != "" && category != "plus" && category != "pro" && category != "degraded" && category != "unassigned" {
-		common.ApiErrorT(c, "Invalid CPA account category")
-		return
-	}
-	if category != "" && !matchesCPAChannel(originChannel) {
-		common.ApiErrorT(c, "CPA account category requires a CPA channel")
-		return
-	}
-
 	proxyChanged := false
 	_, settingProvided := requestData["setting"]
 	if settingProvided {
@@ -1305,14 +1279,9 @@ func UpdateChannel(c *gin.Context) {
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
 	if service.IsProviderPool(originChannel) {
-		// Pool category and concurrency are edited only through the
-		// dedicated account pool API, never channel serialization.
+		// Account concurrency is managed through the account pool panel.
 		channel.ChannelInfo.ProviderPoolCategory = originChannel.ChannelInfo.ProviderPoolCategory
 		channel.ChannelInfo.ProviderPoolConcurrency = originChannel.ChannelInfo.ProviderPoolConcurrency
-		if !service.ProviderPoolCategoryMatchesGroups(channel.ChannelInfo.ProviderPoolCategory, channel.GetGroups()) {
-			common.ApiErrorT(c, "Account type must match at least one customer group")
-			return
-		}
 	}
 
 	if channelHasSensitiveChanges(&channel, originChannel, requestData) &&
@@ -1320,16 +1289,6 @@ func UpdateChannel(c *gin.Context) {
 		common.ApiErrorT(c, "Unauthorized, insufficient privileges")
 		return
 	}
-	if channel.ShareCPAPool != nil {
-		target := *originChannel
-		target.CPAAccountPool = channel.CPAAccountPool
-		if err := provisionCPAChannel(c.Request.Context(), &target, *channel.ShareCPAPool); err != nil {
-			common.ApiError(c, err)
-			return
-		}
-		channel.CPAPoolID = target.CPAPoolID
-	}
-
 	// If the request explicitly specifies a new MultiKeyMode, apply it on top of the original info.
 	if channel.MultiKeyMode != nil && *channel.MultiKeyMode != "" {
 		channel.ChannelInfo.MultiKeyMode = constant.MultiKeyMode(*channel.MultiKeyMode)
@@ -1905,10 +1864,6 @@ func CopyChannel(c *gin.Context) {
 	}
 
 	// insert
-	if err := provisionCPAChannel(c.Request.Context(), &clone, origin.CPAPoolID); err != nil {
-		common.ApiError(c, err)
-		return
-	}
 	if err := clone.Insert(); err != nil {
 		common.SysError(common.LogText("failed to clone channel: %s", err.Error()))
 		common.ApiErrorT(c, "Failed to copy channel. Please try again later")

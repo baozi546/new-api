@@ -61,7 +61,6 @@ import {
 import { truncateText } from '@/lib/utils'
 
 import { getCodexUsage, updateChannelBalance } from '../api'
-import { CPAChannelPoolStatus } from './cpa-accounts-dialog'
 import {
   CHANNEL_STATUS_CONFIG,
   CHANNEL_TYPE_TASK_PLUGIN,
@@ -823,7 +822,6 @@ export function useChannelsColumns(
                   )}
                   <UpstreamUpdateTags channel={channel} />
                 </div>
-                <CPAChannelPoolStatus id={channel.id} />
                 {channel.remark && (
                   <TooltipProvider delay={200}>
                     <Tooltip>

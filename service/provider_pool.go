@@ -7,22 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net/url"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/gin-gonic/gin"
 )
 
 type ProviderPoolSettings struct {
-	Category    string `json:"category"`
-	Concurrency int    `json:"concurrency"`
+	Concurrency int `json:"concurrency"`
 }
 
 var providerPoolCursors sync.Map
@@ -30,40 +26,13 @@ var providerPoolCursors sync.Map
 func GetProviderPoolSettings(channelID int) ProviderPoolSettings {
 	channel, err := model.GetChannelById(channelID, false)
 	if err != nil {
-		return ProviderPoolSettings{Category: "unknown", Concurrency: 1}
+		return ProviderPoolSettings{Concurrency: 1}
 	}
-	category := channel.ChannelInfo.ProviderPoolCategory
-	if category == "" {
-		category = "unknown"
-		groups := channel.GetGroups()
-		if len(groups) == 1 && slices.Contains([]string{"plus", "pro", "degraded"}, groups[0]) {
-			category = groups[0]
-		}
-	}
-	return ProviderPoolSettings{Category: category, Concurrency: max(1, channel.ChannelInfo.ProviderPoolConcurrency)}
+	return ProviderPoolSettings{Concurrency: max(1, channel.ChannelInfo.ProviderPoolConcurrency)}
 }
 
 func (s ProviderPoolSettings) Valid() bool {
-	return slices.Contains([]string{"plus", "pro", "degraded", "unknown"}, s.Category) && s.Concurrency >= 1 && s.Concurrency <= 10000
-}
-
-// ProviderPoolCategoryMatchesGroups keeps the public customer group aligned
-// with the actual subscription type selected by the channel.
-func ProviderPoolCategoryMatchesGroups(category string, groups []string) bool {
-	if category == "" || category == "unknown" {
-		return true
-	}
-	matched := false
-	for _, group := range groups {
-		group = strings.ToLower(strings.TrimSpace(group))
-		if slices.Contains([]string{"plus", "pro", "degraded"}, group) {
-			if group != category {
-				return false
-			}
-			matched = true
-		}
-	}
-	return matched
+	return s.Concurrency >= 1 && s.Concurrency <= 10000
 }
 
 func IsProviderPool(channel *model.Channel) bool {
@@ -91,16 +60,7 @@ type ProviderPoolChannel struct {
 	ID          int      `json:"id"`
 	Name        string   `json:"name"`
 	Groups      []string `json:"groups"`
-	Category    string   `json:"category"`
 	Concurrency int      `json:"concurrency"`
-}
-
-func providerPoolIdentity(channel *model.Channel, pluginKey string) string {
-	parsed, err := url.Parse(strings.TrimSpace(channel.GetBaseURL()))
-	if err != nil {
-		return pluginKey + "\x00" + strings.TrimRight(channel.GetBaseURL(), "/")
-	}
-	return pluginKey + "\x00" + strings.ToLower(parsed.Scheme) + "://" + strings.ToLower(parsed.Host)
 }
 
 func ListProviderPoolAccounts(ctx context.Context, channel *model.Channel, includeUncachedProfiles ...bool) ([]ProviderPoolAccount, error) {
@@ -108,53 +68,47 @@ func ListProviderPoolAccounts(ctx context.Context, channel *model.Channel, inclu
 	if !ok || !plugin.Meta.AccountPool {
 		return nil, errors.New("channel does not use an account pool plugin")
 	}
-	var channels []*model.Channel
-	if err := model.DB.Where("type = ?", constant.ChannelTypeTaskPlugin).Order("id").Find(&channels).Error; err != nil {
-		return nil, err
+	if channel.GetSetting().TaskPluginKey != plugin.Meta.Key {
+		return nil, errors.New("channel plugin changed while loading its accounts")
 	}
-	identity := providerPoolIdentity(channel, plugin.Meta.Key)
 	var accounts []ProviderPoolAccount
-	var shared []ProviderPoolChannel
-	for _, owner := range channels {
-		if owner.GetSetting().TaskPluginKey != plugin.Meta.Key || providerPoolIdentity(owner, plugin.Meta.Key) != identity {
+	assignedChannel := ProviderPoolChannel{ID: channel.Id, Name: channel.Name, Groups: channel.GetGroups(),
+		Concurrency: max(1, channel.ChannelInfo.ProviderPoolConcurrency)}
+	for index, line := range pluginCredentialKeyLines(channel) {
+		credential, ok := jsplugin.ParseCredential(line)
+		if !ok || credential.Plugin != plugin.Meta.Key || credential.AccountID == "" {
 			continue
 		}
-		shared = append(shared, ProviderPoolChannel{ID: owner.Id, Name: owner.Name, Groups: owner.GetGroups(),
-			Category: owner.ChannelInfo.ProviderPoolCategory, Concurrency: max(1, owner.ChannelInfo.ProviderPoolConcurrency)})
-		for index, line := range pluginCredentialKeyLines(owner) {
-			credential, ok := jsplugin.ParseCredential(line)
-			if !ok || credential.Plugin != plugin.Meta.Key || credential.AccountID == "" {
-				continue
+		state := channel.ChannelInfo.ProviderAccounts[credential.AccountID]
+		profile := state.Profile
+		if len(includeUncachedProfiles) > 0 && includeUncachedProfiles[0] && (profile.Plan == "" || profile.Windows == nil) {
+			described, err := plugin.CallDescribeAccount(ctx, jsplugin.CredentialContext{BaseURL: channel.GetBaseURL(), Credential: credential.Data})
+			if err != nil {
+				return nil, errors.New("account profile could not be read")
 			}
-			state := owner.ChannelInfo.ProviderAccounts[credential.AccountID]
-			profile := state.Profile
-			if len(includeUncachedProfiles) > 0 && includeUncachedProfiles[0] && (profile.Plan == "" || profile.Windows == nil) {
-				described, err := plugin.CallDescribeAccount(ctx, jsplugin.CredentialContext{BaseURL: owner.GetBaseURL(), Credential: credential.Data})
-				if err != nil {
-					return nil, errors.New("account profile could not be read")
-				}
-				profile = described
-			}
-			needsLogin := credential.NeedsLogin || profile.QuotaError == "login_required" || state.Health == "login_required" || state.Health == "account_banned"
-			accounts = append(accounts, ProviderPoolAccount{Owner: owner, Line: line, Index: index, OwnerID: owner.Id,
-				AccountID: credential.AccountID, Label: credential.Label, ExpiresAt: credential.ExpiresAt,
-				NeedsLogin: needsLogin, State: state, Profile: profile})
+			profile = described
 		}
-	}
-	for i := range accounts {
-		accounts[i].Channels = shared
+		needsLogin := credential.NeedsLogin || profile.QuotaError == "login_required" || state.Health == "login_required" || state.Health == "account_banned"
+		accounts = append(accounts, ProviderPoolAccount{Owner: channel, Line: line, Index: index, OwnerID: channel.Id,
+			AccountID: credential.AccountID, Label: credential.Label, ExpiresAt: credential.ExpiresAt,
+			NeedsLogin: needsLogin, State: state, Profile: profile, Channels: []ProviderPoolChannel{assignedChannel}})
 	}
 	return accounts, nil
 }
 
-func ProviderAccountMatches(account ProviderPoolAccount, category string) bool {
-	if category == "degraded" {
-		return account.State.Degraded
+func ProviderAccountMatches(account ProviderPoolAccount, customerGroup, legacyCategory string) bool {
+	customerGroup = strings.ToLower(strings.TrimSpace(customerGroup))
+	if customerGroup != "plus" && customerGroup != "pro" {
+		legacyCategory = strings.ToLower(strings.TrimSpace(legacyCategory))
+		if legacyCategory == "plus" || legacyCategory == "pro" {
+			customerGroup = legacyCategory
+		}
 	}
-	if account.State.Degraded {
-		return false
+	if customerGroup == "plus" || customerGroup == "pro" {
+		return !account.State.Degraded && account.Profile.PlanVerified && account.Profile.Category == customerGroup
 	}
-	return account.Profile.PlanVerified && account.Profile.Category == category
+	return !account.State.Degraded && account.Profile.PlanVerified &&
+		(account.Profile.Category == "plus" || account.Profile.Category == "pro")
 }
 
 func ProviderAccountUsable(account ProviderPoolAccount) bool {
@@ -168,17 +122,17 @@ func SelectProviderPoolAccount(c *gin.Context, channel *model.Channel) (string, 
 	if err != nil {
 		return "", 0, err
 	}
-	category := GetProviderPoolSettings(channel.Id).Category
+	customerGroup := c.GetString("group")
 	fixed := c.GetString("provider_pool_fixed_account")
 	eligible := make([]ProviderPoolAccount, 0, len(accounts))
 	for _, account := range accounts {
-		if !ProviderAccountMatches(account, category) || !ProviderAccountUsable(account) || fixed != "" && account.AccountID != fixed {
+		if !ProviderAccountMatches(account, customerGroup, channel.ChannelInfo.ProviderPoolCategory) || !ProviderAccountUsable(account) || fixed != "" && account.AccountID != fixed {
 			continue
 		}
 		eligible = append(eligible, account)
 	}
 	if len(eligible) == 0 {
-		return "", 0, errors.New("no available account for this account pool category")
+		return "", 0, errors.New("no available account matching the customer group")
 	}
 	cursor, _ := providerPoolCursors.LoadOrStore(channel.Id, &atomic.Uint64{})
 	index := (cursor.(*atomic.Uint64).Add(1) - 1) % uint64(len(eligible))
@@ -280,7 +234,7 @@ func RevalidateProviderPoolAccount(c *gin.Context, channelID int) (ProviderPoolA
 	if err != nil {
 		return ProviderPoolAccount{}, err
 	}
-	if !ProviderAccountUsable(account) || !ProviderAccountMatches(account, GetProviderPoolSettings(channelID).Category) {
+	if !ProviderAccountUsable(account) || !ProviderAccountMatches(account, c.GetString("group"), channel.ChannelInfo.ProviderPoolCategory) {
 		return ProviderPoolAccount{}, errors.New("account is no longer available")
 	}
 	c.Set("provider_pool_owner_id", account.OwnerID)
@@ -307,6 +261,24 @@ func FindProviderPoolAccount(ctx context.Context, channel *model.Channel, accoun
 		}
 	}
 	return ProviderPoolAccount{}, fmt.Errorf("account does not exist in this pool")
+}
+
+// TransferProviderPoolAccount moves an account only between channels bound to
+// the same account-pool plugin, preserving the account's quota and health data.
+func TransferProviderPoolAccount(sourceID, targetID int, accountID string) error {
+	source, err := model.GetChannelById(sourceID, true)
+	if err != nil || !IsProviderPool(source) {
+		return errors.New("source channel does not use an account pool")
+	}
+	target, err := model.GetChannelById(targetID, true)
+	if err != nil || !IsProviderPool(target) {
+		return errors.New("target channel does not use an account pool")
+	}
+	pluginKey := source.GetSetting().TaskPluginKey
+	if target.GetSetting().TaskPluginKey != pluginKey {
+		return errors.New("source and target use different account-pool plugins")
+	}
+	return model.TransferProviderPoolAccount(sourceID, targetID, pluginKey, accountID)
 }
 
 func RemoveProviderPoolAccount(account ProviderPoolAccount) error {

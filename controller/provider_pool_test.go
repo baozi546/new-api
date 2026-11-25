@@ -2,6 +2,7 @@ package controller
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -75,7 +76,54 @@ func TestProviderPoolImportStoresAccountAndReturnsOnlyQuotaSummary(t *testing.T)
 	require.NotContains(t, raw, "secret-access-token")
 }
 
-func TestProviderPoolCreatesDedicatedPluginChannelAndRelinksCustomerGroup(t *testing.T) {
+func TestProviderPoolTransferRequiresAdministratorAndMovesTheAccount(t *testing.T) {
+	const pluginKey = "controller-pool-transfer"
+	setupProviderPluginControllerTest(t, pluginKey)
+	require.NoError(t, jsplugin.DefaultRegistry.Unregister(pluginKey))
+	registerProviderPoolImportPlugin(t, pluginKey)
+	line, err := (jsplugin.Credential{
+		Plugin: pluginKey, AccountID: "transfer-account", Data: []byte(`{"access_token":"secret-transfer-token"}`),
+	}).Line()
+	require.NoError(t, err)
+	source := insertPluginChannel(t, pluginKey, "https://chatgpt.com", line, true)
+	target := insertPluginChannel(t, pluginKey, "https://chatgpt.com", "", true)
+	source.Group, target.Group = "plus,pro", "plus,pro"
+	source.ChannelInfo.ProviderAccounts = map[string]model.ProviderAccountState{
+		"transfer-account": {Disabled: true, Profile: jsplugin.AccountProfile{Plan: "pro", Category: "pro", PlanVerified: true}},
+	}
+	require.NoError(t, model.DB.Model(source).Updates(map[string]any{
+		"group": source.Group, "channel_info": source.ChannelInfo,
+	}).Error)
+	require.NoError(t, model.DB.Model(target).Update("group", target.Group).Error)
+	model.InitChannelCache()
+	body, err := common.Marshal(map[string]any{"action": "transfer", "target_channel_id": target.Id})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("id", 2)
+	ctx.Set("role", common.RoleCommonUser)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/api/channel/account_pool/accounts/transfer-account", strings.NewReader(string(body)))
+	ctx.Params = gin.Params{idParam(source.Id), gin.Param{Key: "account_id", Value: "transfer-account"}}
+	OperateProviderAccount(ctx)
+	var response channelAPIResponse
+	require.NoError(t, common.Unmarshal(recorder.Body.Bytes(), &response))
+	require.False(t, response.Success)
+
+	response, raw := callChannelAPI(t, OperateProviderAccount, http.MethodPost,
+		"/api/channel/account_pool/accounts/transfer-account", string(body), idParam(source.Id), gin.Param{Key: "account_id", Value: "transfer-account"})
+	require.True(t, response.Success, raw)
+	storedSource, err := model.GetChannelById(source.Id, true)
+	require.NoError(t, err)
+	storedTarget, err := model.GetChannelById(target.Id, true)
+	require.NoError(t, err)
+	require.Empty(t, storedSource.Key)
+	require.Equal(t, line, storedTarget.Key)
+	require.Empty(t, storedSource.ChannelInfo.ProviderAccounts)
+	require.True(t, storedTarget.ChannelInfo.ProviderAccounts["transfer-account"].Disabled)
+}
+
+func TestProviderPoolCreatesChannelWithAutomaticGroupsAndModelDiscovery(t *testing.T) {
 	const pluginKey = "controller-pool-create"
 	setupProviderPluginControllerTest(t, pluginKey)
 	require.NoError(t, jsplugin.DefaultRegistry.Unregister(pluginKey))
@@ -93,45 +141,46 @@ func TestProviderPoolCreatesDedicatedPluginChannelAndRelinksCustomerGroup(t *tes
 	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"default":1,"svip":2.5}`))
 	require.NoError(t, setting.UpdateUserUsableGroupsByJSONString(`{"default":"Default"}`))
 
-	body := ` {"plugin":"controller-pool-create","name":"Subscription pool","groups":["plus"],"models":["pool-model"],"settings":{"category":"plus","concurrency":2}}`
+	body := `{"plugin":"controller-pool-create","name":"Subscription pool","settings":{"concurrency":2}}`
 	response, raw := callChannelAPI(t, CreateProviderAccountPool, http.MethodPost, "/api/channel/account_pools", body)
 	require.True(t, response.Success, raw)
-	var created struct {
-		ID int `json:"id"`
-	}
+	var created struct { ID int `json:"id"` }
 	require.NoError(t, common.Unmarshal(response.Data, &created))
 	channel, err := model.GetChannelById(created.ID, true)
 	require.NoError(t, err)
 	require.Equal(t, constant.ChannelTypeTaskPlugin, channel.Type)
 	require.Equal(t, pluginKey, channel.GetSetting().TaskPluginKey)
 	require.Equal(t, "https://chatgpt.com", channel.GetBaseURL())
+	require.Equal(t, []string{"plus", "pro"}, channel.GetGroups())
+	require.Empty(t, channel.GetModels())
 	require.Equal(t, 2.5, ratio_setting.GetGroupRatio("plus"))
+	require.Equal(t, 2.5, ratio_setting.GetGroupRatio("pro"))
 
 	response, raw = callChannelAPI(t, SaveProviderAccountPool, http.MethodPut, "/api/channel/1/account_pool",
-		`{"category":"pro","concurrency":3}`, idParam(created.ID))
+		`{"concurrency":3}`, idParam(created.ID))
 	require.True(t, response.Success, raw)
 	channel, err = model.GetChannelById(created.ID, true)
 	require.NoError(t, err)
-	require.Equal(t, []string{"pro"}, channel.GetGroups())
-	require.Equal(t, "pro", channel.ChannelInfo.ProviderPoolCategory)
+	require.Equal(t, []string{"plus", "pro"}, channel.GetGroups())
+	require.Equal(t, "unknown", channel.ChannelInfo.ProviderPoolCategory)
 	require.Equal(t, 3, channel.ChannelInfo.ProviderPoolConcurrency)
-	require.Equal(t, 2.5, ratio_setting.GetGroupRatio("pro"))
 	var abilities []model.Ability
 	require.NoError(t, model.DB.Where("channel_id = ?", created.ID).Find(&abilities).Error)
-	require.Len(t, abilities, 1)
-	require.Equal(t, "pro", abilities[0].Group)
+	require.Empty(t, abilities)
 }
-
-func TestProviderPoolRejectsConflictingSubscriptionGroups(t *testing.T) {
+func TestProviderPoolCreationIgnoresLegacyAccountTypeAndModelInputs(t *testing.T) {
 	const pluginKey = "controller-pool-groups"
 	setupProviderPluginControllerTest(t, pluginKey)
 	require.NoError(t, jsplugin.DefaultRegistry.Unregister(pluginKey))
 	registerProviderPoolImportPlugin(t, pluginKey)
 
-	body := `{"plugin":"controller-pool-groups","name":"Invalid pool","groups":["plus","pro"],"models":["pool-model"],"settings":{"category":"pro","concurrency":1}}`
+	body := `{"plugin":"controller-pool-groups","name":"Automatic pool","groups":["plus"],"models":["manual-model"],"settings":{"category":"pro","concurrency":1}}`
 	response, raw := callChannelAPI(t, CreateProviderAccountPool, http.MethodPost, "/api/channel/account_pools", body)
-	require.False(t, response.Success, raw)
-	var count int64
-	require.NoError(t, model.DB.Model(&model.Channel{}).Count(&count).Error)
-	require.Zero(t, count)
+	require.True(t, response.Success, raw)
+	var created struct { ID int `json:"id"` }
+	require.NoError(t, common.Unmarshal(response.Data, &created))
+	channel, err := model.GetChannelById(created.ID, true)
+	require.NoError(t, err)
+	require.Equal(t, []string{"plus", "pro"}, channel.GetGroups())
+	require.Empty(t, channel.GetModels())
 }

@@ -47,6 +47,7 @@ type testResult struct {
 
 type accountInspectionInput struct {
 	AccountID string
+	Group     string
 	Prompt    string
 	Effort    string
 }
@@ -220,6 +221,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	c.Set("group", group)
 
 	if len(inspection) > 0 {
+		c.Set("group", inspection[0].Group)
 		c.Set("provider_pool_fixed_account", inspection[0].AccountID)
 	}
 	newAPIError := middleware.SetupContextForSelectedChannel(c, channel, testModel)

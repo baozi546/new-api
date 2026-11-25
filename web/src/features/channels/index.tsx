@@ -34,7 +34,6 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import { getChannelOps } from './api'
 import { ChannelsDialogs } from './components/channels-dialogs'
-import { CPAAccountsDialog, CPAChannelPoolProvider } from './components/cpa-accounts-dialog'
 import { ChannelsPrimaryButtons } from './components/channels-primary-buttons'
 import { ChannelsProvider } from './components/channels-provider'
 import { ChannelsTable } from './components/channels-table'
@@ -43,7 +42,7 @@ export function Channels() {
   const { t } = useTranslation()
   const role = useAuthStore((state) => state.auth.user?.role ?? 0)
   const isRoot = role === ROLE.SUPER_ADMIN
-  const canManageCPA = role >= ROLE.ADMIN
+  const canManageChannelTools = role >= ROLE.ADMIN
   const channelOpsQuery = useQuery({
     queryKey: ['channel-ops'],
     queryFn: async () => requireServerSuccess(await getChannelOps()),
@@ -88,7 +87,6 @@ export function Channels() {
 
   return (
     <ChannelsProvider>
-      <CPAChannelPoolProvider enabled={canManageCPA}>
       <SectionPageLayout fixedContent>
         <SectionPageLayout.Title>
           <span className='flex min-w-0 items-center gap-2'>
@@ -97,8 +95,22 @@ export function Channels() {
           </span>
         </SectionPageLayout.Title>
         <SectionPageLayout.Actions>
-          {canManageCPA && <Link className='rounded-md border px-3 py-2 text-sm font-medium' to='/channel-inspections'>{t('Channel inspections')}</Link>}
-          {canManageCPA && <CPAAccountsDialog />}
+          {canManageChannelTools && (
+            <Link
+              className='rounded-md border px-3 py-2 text-sm font-medium'
+              to='/account-pools'
+            >
+              {t('Account pools')}
+            </Link>
+          )}
+          {canManageChannelTools && (
+            <Link
+              className='rounded-md border px-3 py-2 text-sm font-medium'
+              to='/channel-inspections'
+            >
+              {t('Channel inspections')}
+            </Link>
+          )}
           <ChannelsPrimaryButtons />
         </SectionPageLayout.Actions>
         <SectionPageLayout.Content>
@@ -107,7 +119,6 @@ export function Channels() {
       </SectionPageLayout>
 
       <ChannelsDialogs />
-      </CPAChannelPoolProvider>
     </ChannelsProvider>
   )
 }

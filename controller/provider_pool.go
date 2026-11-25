@@ -47,36 +47,27 @@ func CreateProviderAccountPool(c *gin.Context) {
 	var request struct {
 		Plugin   string                       `json:"plugin"`
 		Name     string                       `json:"name"`
-		Groups   []string                     `json:"groups"`
-		Models   []string                     `json:"models"`
 		Settings service.ProviderPoolSettings `json:"settings"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32<<10)
-	if common.DecodeJson(c.Request.Body, &request) != nil || strings.TrimSpace(request.Name) == "" || len(request.Name) > 128 || len(request.Groups) == 0 || len(request.Models) == 0 || !request.Settings.Valid() {
+	if common.DecodeJson(c.Request.Body, &request) != nil || strings.TrimSpace(request.Name) == "" || len(request.Name) > 128 {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
-	if len(request.Groups) > 32 || len(request.Models) > 256 {
+	if request.Settings.Concurrency == 0 {
+		request.Settings.Concurrency = 1
+	}
+	if !request.Settings.Valid() {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
-	}
-	for _, item := range append(append([]string{}, request.Groups...), request.Models...) {
-		value := strings.TrimSpace(item)
-		if value == "" || len(value) > 128 || strings.Contains(value, ",") || strings.ContainsAny(value, "\r\n") {
-			common.ApiErrorT(c, "Invalid parameters")
-			return
-		}
 	}
 	plugin, ok := jsplugin.DefaultRegistry.Get(request.Plugin)
 	if !ok || !plugin.Meta.AccountPool {
 		common.ApiErrorT(c, "Account pool plugin is unavailable")
 		return
 	}
-	if !service.ProviderPoolCategoryMatchesGroups(request.Settings.Category, request.Groups) {
-		common.ApiErrorT(c, "Account type must match at least one customer group")
-		return
-	}
-	if err := ensureProviderPoolCustomerGroups(request.Groups); err != nil {
+	groups := []string{"plus", "pro"}
+	if err := ensureProviderPoolCustomerGroups(groups); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -86,11 +77,12 @@ func CreateProviderAccountPool(c *gin.Context) {
 		return
 	}
 	settingText, baseURL := string(setting), plugin.Meta.BaseURL
+	models := append([]string{}, plugin.Meta.Models...)
 	channel := model.Channel{Type: constant.ChannelTypeTaskPlugin, Name: strings.TrimSpace(request.Name),
-		Status: common.ChannelStatusEnabled, Group: strings.Join(request.Groups, ","), Models: strings.Join(request.Models, ","),
+		Status: common.ChannelStatusEnabled, Group: strings.Join(groups, ","), Models: strings.Join(models, ","),
 		CreatedTime: common.GetTimestamp(), Setting: &settingText, BaseURL: &baseURL,
 		ChannelInfo: model.ChannelInfo{IsMultiKey: true, MultiKeyMode: constant.MultiKeyModePolling,
-			ProviderPoolCategory: request.Settings.Category, ProviderPoolConcurrency: request.Settings.Concurrency}}
+			ProviderPoolCategory: "unknown", ProviderPoolConcurrency: request.Settings.Concurrency}}
 	if err := validateChannel(&channel, true); err != nil {
 		common.ApiError(c, err)
 		return
@@ -211,11 +203,7 @@ func SaveProviderAccountPool(c *gin.Context) {
 		common.ApiErrorT(c, "Invalid parameters")
 		return
 	}
-	if err := ensureProviderPoolCustomerGroups([]string{settings.Category}); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	err := model.UpdateProviderPoolSettings(channel.Id, settings.Category, settings.Concurrency)
+	err := model.UpdateProviderPoolSettings(channel.Id, settings.Concurrency)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -258,30 +246,71 @@ func ImportProviderAccount(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	importStatus := "imported"
 	for _, account := range accounts {
 		if account.AccountID == result.AccountID {
-			common.ApiSuccess(c, gin.H{"status": "exists", "account_id": account.AccountID})
+			importStatus = "exists"
+			break
+		}
+	}
+	if importStatus == "imported" {
+		if _, err = service.StorePluginLoginCredential(channel.Id, plugin.Meta.Key, nil, true, result); err != nil {
+			common.ApiError(c, err)
 			return
 		}
+		model.InitChannelCache()
+		recordManageAudit(c, "channel.update", map[string]any{"id": channel.Id, "source": "account_pool_import", "account_id": result.AccountID})
 	}
-	_, err = service.StorePluginLoginCredential(channel.Id, plugin.Meta.Key, nil, true, result)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	model.InitChannelCache()
-	recordManageAudit(c, "channel.update", map[string]any{"id": channel.Id, "source": "account_pool_import", "account_id": result.AccountID})
-	// Query the real subscription before a Plus/Pro channel can select it.
 	refreshErr := ""
-	account, err := service.FindProviderPoolAccount(c.Request.Context(), channel, result.AccountID)
-	if err == nil {
-		queryCtx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
-		if err = service.RefreshProviderPoolAccount(queryCtx, account); err != nil {
-			refreshErr = "quota_unavailable"
+	modelsError := ""
+	modelsUpdated := 0
+	channel, err = model.GetChannelById(channel.Id, true)
+	if err != nil {
+		refreshErr = "quota_unavailable"
+		if plugin.Meta.Key == "gpt-account-pool" {
+			modelsError = "model_discovery_unavailable"
 		}
-		cancel()
+	} else {
+		account, findErr := service.FindProviderPoolAccount(c.Request.Context(), channel, result.AccountID)
+		if findErr != nil {
+			refreshErr = "quota_unavailable"
+		} else {
+			queryCtx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
+			if err = service.RefreshProviderPoolAccount(queryCtx, account); err != nil {
+				refreshErr = "quota_unavailable"
+			}
+			cancel()
+		}
+		if plugin.Meta.Key == "gpt-account-pool" {
+			channel, err = model.GetChannelById(channel.Id, true)
+			if err == nil {
+				account, err = service.FindProviderPoolAccount(c.Request.Context(), channel, result.AccountID)
+			}
+			if err == nil {
+				modelCtx, cancel := context.WithTimeout(c.Request.Context(), 45*time.Second)
+				discovered, discoverErr := service.FetchGPTAccountPoolModels(modelCtx, account)
+				cancel()
+				if discoverErr != nil || len(discovered) == 0 {
+					modelsError = "model_discovery_unavailable"
+				} else {
+					var changed bool
+					changed, err = model.MergeChannelModels(channel.Id, discovered)
+					if err != nil {
+						modelsError = "model_discovery_unavailable"
+					} else {
+						modelsUpdated = len(discovered)
+						if changed {
+							model.InitChannelCache()
+						}
+					}
+				}
+			} else {
+				modelsError = "model_discovery_unavailable"
+			}
+		}
 	}
-	common.ApiSuccess(c, gin.H{"status": "imported", "account_id": result.AccountID, "quota_error": refreshErr})
+	common.ApiSuccess(c, gin.H{"status": importStatus, "account_id": result.AccountID, "quota_error": refreshErr,
+		"models_error": modelsError, "models_updated": modelsUpdated})
 }
 
 func OperateProviderAccount(c *gin.Context) {
@@ -295,7 +324,8 @@ func OperateProviderAccount(c *gin.Context) {
 		return
 	}
 	var request struct {
-		Action string `json:"action"`
+		Action         string `json:"action"`
+		TargetChannelID int    `json:"target_channel_id"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
 	if common.DecodeJson(c.Request.Body, &request) != nil {
@@ -303,17 +333,21 @@ func OperateProviderAccount(c *gin.Context) {
 		return
 	}
 	switch request.Action {
+	case "transfer":
+		if role := c.GetInt("role"); role != common.RoleAdminUser && role != common.RoleRootUser {
+			common.ApiErrorT(c, "Unauthorized, insufficient privileges")
+			return
+		}
+		err = service.TransferProviderPoolAccount(channel.Id, request.TargetChannelID, account.AccountID)
 	case "refresh":
 		err = service.RefreshProviderPoolAccount(c.Request.Context(), account)
-	case "enable", "disable", "degraded", "restore":
+	case "enable", "disable", "restore":
 		err = service.UpdateProviderAccount(account.OwnerID, account.AccountID, func(state *model.ProviderAccountState) {
 			switch request.Action {
 			case "enable":
 				state.Disabled = false
 			case "disable":
 				state.Disabled = true
-			case "degraded":
-				state.Degraded = true
 			case "restore":
 				state.Degraded = false
 				state.WrongAnswers = 0
@@ -333,6 +367,10 @@ func OperateProviderAccount(c *gin.Context) {
 		common.ApiErrorT(c, "Account operation failed")
 		return
 	}
-	recordManageAudit(c, "channel.update", map[string]any{"id": channel.Id, "source": "account_pool_" + request.Action, "account_id": account.AccountID})
+	audit := map[string]any{"id": channel.Id, "source": "account_pool_" + request.Action, "account_id": account.AccountID}
+	if request.Action == "transfer" {
+		audit["target_channel_id"] = request.TargetChannelID
+	}
+	recordManageAudit(c, "channel.update", audit)
 	common.ApiSuccess(c, nil)
 }

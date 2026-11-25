@@ -949,6 +949,10 @@ func GetTaskPluginOptions(c *gin.Context) {
 			if switchedOff {
 				parts.Task, parts.Provider, parts.Login, parts.Refresh = false, false, false, false
 			}
+			models := meta.Models
+			if models == nil {
+				models = []string{}
+			}
 			seen[meta.Key] = true
 			hasIcon := false
 			if layer == 0 {
@@ -968,7 +972,7 @@ func GetTaskPluginOptions(c *gin.Context) {
 				"baseUrl":         meta.BaseURL,
 				"sortPriority":    meta.SortPriority,
 				"website":         meta.Website,
-				"models":          meta.Models,
+				"models":          models,
 				"channelTypes":    meta.ChannelTypes,
 				"upstreams":       meta.Upstreams,
 				"usageSchema":     meta.UsageSchema,

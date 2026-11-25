@@ -13,7 +13,25 @@ import { formatTimestampToDate } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { request } from './lib/cpa-channel-pools'
+async function requestInspection<T>(
+  method: 'GET' | 'POST',
+  path = '',
+  data?: unknown
+): Promise<T> {
+  const response = await api.request({
+    method,
+    url: `/api/channel-inspections/manage${path}`,
+    data,
+  })
+  if (!response.data?.success) {
+    throw new Error(
+      typeof response.data?.message === 'string'
+        ? response.data.message
+        : 'Request failed'
+    )
+  }
+  return response.data.data as T
+}
 
 type Settings = {
   reasoning_effort?: string
@@ -72,7 +90,7 @@ function Editor({
     setBusy(true)
     setMessage('')
     try {
-      await request(
+      await requestInspection(
         'POST',
         `/inspections/${row.id}${run ? '/run' : ''}`,
         run ? {} : draft
@@ -272,7 +290,7 @@ export function ChannelInspections() {
   const query = useQuery({
     queryKey: ['channel-inspections', manage ? 'manage' : 'customer'],
     queryFn: async () => {
-      if (manage) return request<Card[]>('GET', '/inspections')
+      if (manage) return requestInspection<Card[]>('GET')
       const { data } = await api.get('/api/channel-inspections')
       if (!data?.success) throw new Error('Request failed')
       return data.data as Card[]

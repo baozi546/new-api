@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -39,8 +39,6 @@ import {
 import type { Channel } from '../types'
 
 type UseChannelMutateFormParams = {
-  sharedCPAPool?: string
-  cpaAccountPool?: string
   currentRow?: Channel | null
   isEditing: boolean
   isMultiKeyChannel: boolean
@@ -49,7 +47,6 @@ type UseChannelMutateFormParams = {
 
 const SENSITIVE_UPDATE_FIELDS = [
   'type',
-  'cpa_account_pool',
   'key',
   'base_url',
   'openai_organization',
@@ -62,7 +59,6 @@ const SENSITIVE_UPDATE_FIELDS = [
 
 export function useChannelMutateForm(props: UseChannelMutateFormParams) {
   const { t } = useTranslation()
-  const queryClient = useQueryClient()
   const currentUser = useAuthStore((s) => s.auth.user)
   const canEditSensitive = hasPermission(
     currentUser,
@@ -100,12 +96,6 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
 
         const response = await updateChannel(props.currentRow.id, {
           ...payloadWithKeyMode,
-          ...(canEditSensitive && props.sharedCPAPool !== undefined
-            ? { share_cpa_pool: props.sharedCPAPool }
-            : {}),
-          ...(canEditSensitive && props.cpaAccountPool !== undefined
-            ? { cpa_account_pool: props.cpaAccountPool }
-            : {}),
           ...(canEditSensitive && props.isMultiKeyChannel
             ? { multi_key_mode: data.multi_key_type }
             : {}),
@@ -117,17 +107,7 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
       }
 
       const payload = transformFormDataToCreatePayload(data)
-      const createPayload = {
-        ...payload,
-        channel: {
-          ...payload.channel,
-          ...(props.cpaAccountPool !== undefined
-            ? { cpa_account_pool: props.cpaAccountPool }
-            : {}),
-        },
-        ...(props.sharedCPAPool ? { share_cpa_pool: props.sharedCPAPool } : {}),
-      }
-      const response = await createChannel(createPayload)
+      const response = await createChannel(payload)
       if (!response.success) {
         throw createServerError(response, t(ERROR_MESSAGES.CREATE_FAILED))
       }
@@ -139,7 +119,6 @@ export function useChannelMutateForm(props: UseChannelMutateFormParams) {
     },
     onSuccess: (result) => {
       toast.success(t(result.messageKey))
-      void queryClient.invalidateQueries({ queryKey: ['cpa-channel-bindings'] })
       props.onSuccess()
     },
     onError: (error: unknown) => {

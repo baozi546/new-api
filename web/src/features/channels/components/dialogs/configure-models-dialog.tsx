@@ -47,7 +47,9 @@ export function ConfigureModelsDialog(props: ConfigureModelsDialogProps) {
     props.initialPluginKey ? `plugin:${props.initialPluginKey}` : 'all'
   )
   const plugins =
-    props.plugins?.filter((plugin) => plugin.models.length > 0) ?? []
+    props.plugins?.filter(
+      (plugin) => Array.isArray(plugin.models) && plugin.models.length > 0
+    ) ?? []
   const plugin = plugins.find((item) => `plugin:${item.key}` === source)
   const models = [
     ...new Set(

@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from '@tanstack/react-router'
 import {
   ArrowRight,
   ArrowLeft,
@@ -202,11 +203,6 @@ import {
 } from '../../lib/channel-plugin-extensions'
 import { getChannelTypeConfig } from '../../lib/channel-type-config'
 import {
-  CPA_SHARED_POOL_ID,
-  isCPARelayURL,
-  useCPABindings,
-} from '../../lib/cpa-channel-pools'
-import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
@@ -219,7 +215,6 @@ import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelQuickOptions } from '../channel-quick-options'
 import { ChannelTypeLogo } from '../channel-type-badge'
 import { useChannels } from '../channels-provider'
-import { CPAPoolFields } from '../cpa-pool-fields'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
 import { ConfigureModelsDialog } from '../dialogs/configure-models-dialog'
 import {
@@ -253,7 +248,6 @@ import { ChannelPluginConfigFields } from './channel-plugin-config-fields'
 import { ChannelProviderPicker } from './channel-provider-picker'
 import { ChannelRequestPluginsField } from './channel-request-plugins-field'
 import { PluginCredentialPanel } from './plugin-credential-panel'
-import { ProviderPoolPanel } from '../provider-pool-panel'
 import {
   ChannelApiAccessSection,
   ChannelAuthSection,
@@ -657,16 +651,6 @@ export function ChannelMutateDrawer({
     : defaultBaseURLs?.[currentType] || t(FIELD_PLACEHOLDERS.BASE_URL)
   const currentStatus = formValues.status
   const currentBaseUrl = formValues.base_url
-  const [cpaAccountPool, setCPAAccountPool] = useState<string | undefined>()
-  const cpaBindings = useCPABindings(
-    open && (currentUser?.role ?? 0) >= ROLE.ADMIN
-  )
-  const configuringCPA =
-    currentType === 1 &&
-    isCPARelayURL(currentBaseUrl || '', cpaBindings.data?.endpoints || [])
-  useEffect(() => {
-    setCPAAccountPool(undefined)
-  }, [open, currentRow?.id])
   const currentTaskPluginKey = formValues.task_plugin_key
   const currentTaskExtendPluginKeys = formValues.task_extend_plugin_keys
   const currentKey = formValues.key
@@ -840,6 +824,11 @@ export function ChannelMutateDrawer({
   const taskPluginOptionsQuery = useQuery({
     queryKey: ['task-plugin-options'],
     queryFn: async () => requireServerSuccess(await getTaskPluginOptions()),
+    select: (options) =>
+      options.map((plugin) => ({
+        ...plugin,
+        models: Array.isArray(plugin.models) ? plugin.models : [],
+      })),
     enabled: open && canBindTaskPlugin,
     meta: { errorToast: false },
   })
@@ -939,8 +928,9 @@ export function ChannelMutateDrawer({
         if (!isEditing && !providerTarget && !form.getValues('name').trim()) {
           form.setValue('name', plugin.name)
         }
-        if (plugin.models.length) {
-          form.setValue('models', formatModelsArray(plugin.models), {
+        const pluginModels = Array.isArray(plugin.models) ? plugin.models : []
+        if (pluginModels.length) {
+          form.setValue('models', formatModelsArray(pluginModels), {
             shouldDirty: true,
           })
         }
@@ -1728,10 +1718,6 @@ export function ChannelMutateDrawer({
   }, [])
 
   const channelMutation = useChannelMutateForm({
-    sharedCPAPool: configuringCPA ? CPA_SHARED_POOL_ID : undefined,
-    cpaAccountPool: configuringCPA
-      ? (cpaAccountPool ?? channelData?.data?.cpa_account_pool ?? '')
-      : undefined,
     currentRow,
     isEditing,
     isMultiKeyChannel,
@@ -1884,11 +1870,6 @@ export function ChannelMutateDrawer({
 
       try {
         const result = await channelMutation.mutateAsync(data)
-        if (!isEditing) {
-          void queryClient.invalidateQueries({
-            queryKey: ['cpa-channel-bindings'],
-          })
-        }
         if (!isEditing && loginPlugin && result.channelId) {
           setLoginRequest({
             channelId: result.channelId,
@@ -3389,7 +3370,9 @@ export function ChannelMutateDrawer({
                       disabled={
                         currentModelsArray.length === 0 &&
                         !pluginExtensions.some(
-                          (plugin) => plugin.models.length > 0
+                          (plugin) =>
+                            Array.isArray(plugin.models) &&
+                            plugin.models.length > 0
                         )
                       }
                     >
@@ -3761,15 +3744,6 @@ export function ChannelMutateDrawer({
   const connectionSection = (
     <div className='scroll-mt-4'>
       <ChannelApiAccessSection>
-        {configuringCPA && (
-          <CPAPoolFields
-            category={
-              cpaAccountPool ?? channelData?.data?.cpa_account_pool ?? ''
-            }
-            disabled={!canEditSensitive || isSubmitting}
-            onCategoryChange={setCPAAccountPool}
-          />
-        )}
         {CHANNEL_TYPE_WARNINGS[currentType] && (
           <Alert>
             <AlertDescription>
@@ -4625,23 +4599,31 @@ export function ChannelMutateDrawer({
 
               {pluginLogin ? (
                 <>
-                {boundTaskPlugin?.accountPool && <ProviderPoolPanel channelId={loginChannelId} plugin={boundTaskPlugin} disabled={!canOperateChannel} />}
-                {!boundTaskPlugin?.accountPool && (
-                <PluginCredentialPanel
-                  channelId={loginChannelId}
-                  multiKey={isMultiKeyChannel}
-                  disabled={!canEditSensitive}
-                  onLogin={(keyIndex, add) => {
-                    if (loginChannelId === null || !boundTaskPlugin) return
-                    setLoginRequest({
-                      channelId: loginChannelId,
-                      keyIndex,
-                      add,
-                      plugin: boundTaskPlugin,
-                    })
-                  }}
-                />
-                )}
+                  {boundTaskPlugin?.accountPool ? (
+                    canOperateChannel && (
+                      <Link
+                        className='text-primary underline underline-offset-4'
+                        to='/account-pools'
+                      >
+                        {t('Account pools')}
+                      </Link>
+                    )
+                  ) : (
+                    <PluginCredentialPanel
+                      channelId={loginChannelId}
+                      multiKey={isMultiKeyChannel}
+                      disabled={!canEditSensitive}
+                      onLogin={(keyIndex, add) => {
+                        if (loginChannelId === null || !boundTaskPlugin) return
+                        setLoginRequest({
+                          channelId: loginChannelId,
+                          keyIndex,
+                          add,
+                          plugin: boundTaskPlugin,
+                        })
+                      }}
+                    />
+                  )}
                 </>
               ) : (
                 <FormField

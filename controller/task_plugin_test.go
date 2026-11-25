@@ -528,7 +528,7 @@ export const meta = {
   icon: "text:UO", baseUrl: "http://localhost:9000/",
   channelTypes: [1990, 1991],
   upstreams: ["vendor", "new_api"],
-  models: ["usage-options-model"], fetchMode: "per_task",
+  fetchMode: "per_task",
   usageSchema: {seconds: {type: "number", unit: "second", description: "Video generation unit price"}},
   usageProfiles: [{models:["usage-options-model"],schema:{image_count:{type:"number",unit:"count"}}}]
 };
@@ -554,6 +554,7 @@ export function parseTaskResult() { return {}; }
 			Description   jsplugin.LocalizedText               `json:"description"`
 			Icon          string                               `json:"icon"`
 			BaseURL       string                               `json:"baseUrl"`
+			Models        []string                             `json:"models"`
 			ChannelTypes  []int                                `json:"channelTypes"`
 			Upstreams     []string                             `json:"upstreams"`
 			UsageSchema   map[string]jsplugin.UsageFieldSchema `json:"usageSchema"`
@@ -573,6 +574,8 @@ export function parseTaskResult() { return {}; }
 		assert.Equal(t, []string{"usage-options-model"}, option.UsageProfiles[0].Models)
 		assert.Equal(t, "count", option.UsageProfiles[0].Schema["image_count"].Unit)
 		assert.Equal(t, "text:UO", option.Icon)
+		assert.NotNil(t, option.Models, "missing plugin models must be encoded as an empty array")
+		assert.Empty(t, option.Models)
 		assert.Equal(t, []int{1990, 1991}, option.ChannelTypes)
 		assert.Equal(t, []string{"vendor", "new_api"}, option.Upstreams, "the New API channel form lists only plugins declaring new_api")
 		assert.Equal(t, "http://localhost:9000", option.BaseURL, "the drawer prefills the normalized plugin default")

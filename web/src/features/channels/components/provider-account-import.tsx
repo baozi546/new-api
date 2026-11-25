@@ -18,6 +18,7 @@ import { importPoolAccount } from '../lib/provider-pool-api'
 
 export function ProviderAccountImport(props: {
   channelId: number
+  channelName: string
   disabled?: boolean
   onDone: () => void
 }) {
@@ -43,6 +44,12 @@ export function ProviderAccountImport(props: {
           )
           result =
             response.status === 'exists' ? t('Already imported') : t('Imported')
+          if (response.models_updated)
+            {result += ` · ${t('{{count}} models discovered', {
+              count: response.models_updated,
+            })}`}
+          if (response.models_error)
+            {result += ` · ${t('Model list could not be fetched')}`}
           if (response.quota_error)
             {result += ` · ${t('Quota query unavailable')}`}
         } catch (error) {
@@ -104,7 +111,9 @@ export function ProviderAccountImport(props: {
             setFileError('')
           }
         }}
-        title={t('Import accounts')}
+        title={t('Import accounts to {{channel}}', {
+          channel: props.channelName,
+        })}
         footer={
           <Button
             type='button'
@@ -138,6 +147,8 @@ export function ProviderAccountImport(props: {
               {t(
                 'Paste a JSON object, JSON array, JSONL, Codex auth.json or access token. Credentials stay in server storage.'
               )}
+              {' '}
+              {t('Imported accounts are assigned only to this channel.')}
             </FieldDescription>
           </Field>
           <input

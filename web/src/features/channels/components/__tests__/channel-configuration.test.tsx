@@ -604,6 +604,45 @@ test('a hidden creation drawer does not request plugin options', async () => {
   expect(await screen.findByRole('option', { name: /Video A/ })).toBeVisible()
 })
 
+test('provider selection tolerates plugin options with null models', async () => {
+  const user = userEvent.setup()
+  pluginOptions = [
+    {
+      ...soraPlugin,
+      name: 'No-model plugin',
+      models: null as unknown as string[],
+    },
+  ]
+  render(<ConfigurationHarness initialOpen={false} />)
+
+  await user.click(screen.getByRole('button', { name: 'Open channel' }))
+  const pluginOption = await screen.findByRole('option', {
+    name: /No-model plugin.*0 models/,
+  })
+  expect(pluginOption).toBeVisible()
+  await user.click(pluginOption)
+
+  expect(screen.getByLabelText('API Key *')).toBeVisible()
+})
+
+test('closing channel creation returns the next open to provider selection', async () => {
+  const user = userEvent.setup()
+  render(<ConfigurationHarness initialOpen={false} />)
+
+  await user.click(screen.getByRole('button', { name: 'Open channel' }))
+  await user.click(await screen.findByRole('option', { name: /Video A/ }))
+  expect(api.get).not.toHaveBeenCalledWith('/api/cpa/accounts/bindings')
+  await user.click(screen.getByRole('button', { name: 'Cancel' }))
+  await waitFor(() =>
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  )
+
+  await user.click(screen.getByRole('button', { name: 'Open channel' }))
+
+  expect(await screen.findByRole('option', { name: /Video A/ })).toBeVisible()
+  expect(screen.queryByLabelText('API Key *')).not.toBeInTheDocument()
+})
+
 test('configuration navigation retains its height when the form content overflows', async () => {
   render(<ConfigurationHarness />)
   await userEvent.click(await screen.findByRole('option', { name: /Video A/ }))

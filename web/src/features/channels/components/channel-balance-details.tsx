@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { toIntlLocale } from '@/i18n/languages'
@@ -34,6 +35,32 @@ type ChannelBalanceDetailsProps = {
   className?: string
 }
 
+function formatRemainingTime(resetAt: number, now: number, locale: string) {
+  let remainingMinutes = Math.max(0, Math.ceil((resetAt * 1000 - now) / 60000))
+  const parts: string[] = []
+  const formatUnit = (value: number, unit: 'day' | 'hour' | 'minute') =>
+    new Intl.NumberFormat(locale, {
+      style: 'unit',
+      unit,
+      unitDisplay: 'short',
+    }).format(value)
+
+  const days = Math.floor(remainingMinutes / 1440)
+  if (days > 0) {
+    parts.push(formatUnit(days, 'day'))
+    remainingMinutes -= days * 1440
+  }
+  const hours = Math.floor(remainingMinutes / 60)
+  if (hours > 0) {
+    parts.push(formatUnit(hours, 'hour'))
+    remainingMinutes -= hours * 60
+  }
+  if (remainingMinutes > 0 && parts.length < 2) {
+    parts.push(formatUnit(remainingMinutes, 'minute'))
+  }
+  return parts.join(' ')
+}
+
 /**
  * The limits of a balance with their reset times, when it was last queried
  * and the last query error, one line each.
@@ -41,6 +68,11 @@ type ChannelBalanceDetailsProps = {
 export function ChannelBalanceDetails(props: ChannelBalanceDetailsProps) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 30000)
+    return () => window.clearInterval(timer)
+  }, [])
   const windows = props.result?.windows ?? []
   const error = props.result?.error?.trim()
   if (windows.length === 0 && !props.updatedTime && !error) return null
@@ -49,7 +81,18 @@ export function ChannelBalanceDetails(props: ChannelBalanceDetailsProps) {
     <ul className={cn('space-y-0.5 text-xs', props.className)}>
       {windows.map((window) => (
         <li key={JSON.stringify(window)}>
-          {props.showProgress && <Progress value={Math.min(100, Math.max(0, window.used / window.limit * 100))} aria-label={resolveLocalizedText(window.name, i18n.language) || t('Limit')} className='my-1' />}
+          {props.showProgress && (
+            <Progress
+              value={Math.min(
+                100,
+                Math.max(0, (window.used / window.limit) * 100)
+              )}
+              aria-label={
+                resolveLocalizedText(window.name, i18n.language) || t('Limit')
+              }
+              className='my-1'
+            />
+          )}
           {resolveLocalizedText(window.name, i18n.language) || t('Limit')}:{' '}
           {formatNumber(window.used, locale)} /{' '}
           {formatNumber(window.limit, locale)}
@@ -58,6 +101,13 @@ export function ChannelBalanceDetails(props: ChannelBalanceDetailsProps) {
             <>
               {' · '}
               {t('Reset at:')} {formatTimestampToDate(window.resetAt)}
+              {window.resetAt > now / 1000 && (
+                <>
+                  {' · '}
+                  {t('Resets in:')}{' '}
+                  {formatRemainingTime(window.resetAt, now, locale)}
+                </>
+              )}
             </>
           ) : null}
         </li>

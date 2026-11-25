@@ -168,13 +168,14 @@ function quotaWindows(body) {
       const window = rate[name];
       if (!window || !Number.isFinite(Number(window.used_percent))) continue;
       const seconds = Number(window.limit_window_seconds || Number(window.window_duration_mins || 0) * 60);
-      const label = pair[1] + " " + (seconds ? String(seconds / 3600) + "h" : name);
+      const standardWindow = pair[0] === "rate_limit" || pair[0] === "rate_limits";
+      const label = standardWindow && seconds === 18000 ? "5h" : standardWindow && seconds === 604800 ? "7day" : pair[1] + " " + (seconds ? String(seconds / 3600) + "h" : name);
       windows.push({ name: { en: label, zh: label }, used: Math.max(0, Math.min(100, Number(window.used_percent))), limit: 100, unit: "%", resetAt: Number(window.reset_at || window.resets_at || 0) });
     }
   }
   const subscription = body.subscription;
   if (subscription) {
-    for (const pair of [["window", "Current window"], ["weekly", "Weekly"]]) {
+    for (const pair of [["window", "Current window"], ["weekly", "7day"]]) {
       const window = subscription[pair[0]];
       if (!window || !Number.isFinite(Number(window.used_percent))) continue;
       windows.push({ name: { en: pair[1], zh: pair[1] }, used: Math.max(0, Math.min(100, Number(window.used_percent))), limit: 100, unit: "%", resetAt: Number(window.resets_at || window.reset_at || 0) });

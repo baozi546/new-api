@@ -32,11 +32,7 @@ func inspectProviderPoolChannel(channel model.Channel, cfg inspectionConfig) err
 	if err != nil {
 		return err
 	}
-	category := service.GetProviderPoolSettings(channel.Id).Category
 	for _, account := range accounts {
-		if !service.ProviderAccountMatches(account, category) {
-			continue
-		}
 		mark := accountMark{ID: account.AccountID, Label: account.Label, Time: time.Now().Unix(), Number: index + 1, Result: "disabled"}
 		if !service.ProviderAccountUsable(account) {
 			if account.NeedsLogin {
@@ -50,7 +46,7 @@ func inspectProviderPoolChannel(channel model.Channel, cfg inspectionConfig) err
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 		result := testChannel(ctx, &channel, testUserID, cfg.Model, string(constant.EndpointTypeOpenAI), false,
-			accountInspectionInput{AccountID: account.AccountID, Prompt: question.Prompt, Effort: cfg.ReasoningEffort})
+			accountInspectionInput{AccountID: account.AccountID, Group: account.Profile.Category, Prompt: question.Prompt, Effort: cfg.ReasoningEffort})
 		cancel()
 		mark.Result = "inconclusive"
 		if result.localErr == nil && result.newAPIError == nil {

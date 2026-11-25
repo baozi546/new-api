@@ -116,7 +116,6 @@ func main() {
 	// request runs without the uploaded plugins.
 	controller.SyncTaskPluginsOnce()
 	if common.IsMasterNode {
-		service.StartCPAAccountChecks()
 		controller.StartChannelInspectionSchedule()
 	}
 

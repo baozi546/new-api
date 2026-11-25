@@ -4,11 +4,20 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
+import { Dialog } from '@/components/dialog'
 import { EmptyState } from '@/components/empty-state'
 import { ErrorState } from '@/components/error-state'
 import { LoadingState } from '@/components/loading-state'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { ItemGroup } from '@/components/ui/item'
+import { Field, FieldLabel } from '@/components/ui/field'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { getServerErrorMessage } from '@/lib/server-error-message'
 
 import {
@@ -16,6 +25,7 @@ import {
   operatePoolAccount,
   poolQueryKeys,
   type PoolAccount,
+  type PoolChannel,
 } from '../lib/provider-pool-api'
 import { providerAccountHasIssue } from '../lib/provider-pool-issues'
 import { PluginLoginDialog } from './dialogs/plugin-login-dialog'
@@ -25,6 +35,8 @@ import { ProviderPoolSettings } from './provider-pool-settings'
 
 export function ProviderPoolPanel(props: {
   channelId: number | null
+  channelName: string
+  channels: PoolChannel[]
   plugin: { key: string; name: string }
   disabled?: boolean
 }) {
@@ -36,6 +48,8 @@ export function ProviderPoolPanel(props: {
     index: number | null
   } | null>(null)
   const [removing, setRemoving] = useState<PoolAccount | null>(null)
+  const [transferring, setTransferring] = useState<PoolAccount | null>(null)
+  const [transferTargetId, setTransferTargetId] = useState<number | null>(null)
   const id = props.channelId || 0
   const query = useQuery({
     queryKey: poolQueryKeys.accounts(id),
@@ -44,14 +58,27 @@ export function ProviderPoolPanel(props: {
     refetchInterval: 15000,
   })
   const refresh = async (): Promise<void> => {
-    // A mutation can affect any channel sharing this provider pool.
-    await queryClient.invalidateQueries({ queryKey: ['provider-account-pool'] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['provider-account-pool'] }),
+      queryClient.invalidateQueries({ queryKey: poolQueryKeys.channels }),
+    ])
   }
   const action = useMutation({
-    mutationFn: (value: { account: PoolAccount; operation: string }) =>
-      operatePoolAccount(id, value.account.account_id, value.operation),
+    mutationFn: (value: {
+      account: PoolAccount
+      operation: string
+      targetChannelId?: number
+    }) =>
+      operatePoolAccount(
+        id,
+        value.account.account_id,
+        value.operation,
+        value.targetChannelId
+      ),
     onSuccess: async () => {
       setRemoving(null)
+      setTransferring(null)
+      setTransferTargetId(null)
       await refresh()
     },
   })
@@ -80,6 +107,20 @@ export function ProviderPoolPanel(props: {
   const accounts = query.data.items || []
   const problems = accounts.filter(providerAccountHasIssue)
   const visible = problemsOnly ? problems : accounts
+  const transferTargets = props.channels.filter(
+    (channel) => channel.id !== id && channel.plugin.key === props.plugin.key
+  )
+  const eligibleTransferTargets = transferring
+    ? transferTargets.filter((channel) =>
+        !transferring.profile.plan_verified ||
+        !transferring.profile.category ||
+        channel.groups.some(
+          (group) =>
+            group.trim().toLowerCase() ===
+            transferring.profile.category.trim().toLowerCase()
+        )
+      )
+    : []
   const busy = !!props.disabled || action.isPending || refreshAll.isPending
   return (
     <div className='space-y-4'>
@@ -100,6 +141,7 @@ export function ProviderPoolPanel(props: {
         </Button>
         <ProviderAccountImport
           channelId={id}
+          channelName={props.channelName}
           disabled={busy}
           onDone={() => void refresh()}
         />
@@ -149,6 +191,33 @@ export function ProviderPoolPanel(props: {
                   ? setRemoving(value)
                   : action.mutate({ account: value, operation })
               }
+              onTransfer={
+                transferTargets.some(
+                  (channel) =>
+                    !account.profile.plan_verified ||
+                    !account.profile.category ||
+                    channel.groups.some(
+                      (group) =>
+                        group.trim().toLowerCase() ===
+                        account.profile.category.trim().toLowerCase()
+                    )
+                )
+                  ? (value) => {
+                      const targets = transferTargets.filter(
+                        (channel) =>
+                          !value.profile.plan_verified ||
+                          !value.profile.category ||
+                          channel.groups.some(
+                            (group) =>
+                              group.trim().toLowerCase() ===
+                              value.profile.category.trim().toLowerCase()
+                          )
+                      )
+                      setTransferring(value)
+                      setTransferTargetId(targets[0]?.id || null)
+                    }
+                  : undefined
+              }
             />
           ))}
         </ItemGroup>
@@ -170,15 +239,71 @@ export function ProviderPoolPanel(props: {
           }}
         />
       )}
+      <Dialog
+        open={!!transferring}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTransferring(null)
+            setTransferTargetId(null)
+          }
+        }}
+        title={t('Move account to another channel')}
+        description={t('Moving transfers the account, quota, and inspection status to the selected channel.')}
+        footer={
+          <Button
+            type='button'
+            disabled={busy || !transferTargetId || !transferring}
+        isLoading={action.isPending}
+            onClick={() => {
+              if (!transferring || !transferTargetId) return
+              action.mutate({
+                account: transferring,
+                operation: 'transfer',
+                targetChannelId: transferTargetId,
+              })
+            }}
+          >
+            {t('Move account')}
+          </Button>
+        }
+      >
+        {transferring && (
+          <Field>
+            <FieldLabel htmlFor={`transfer-account-${transferring.account_id}`}>
+              {t('Target channel')}
+            </FieldLabel>
+            <Select
+              value={transferTargetId ? String(transferTargetId) : ''}
+              items={eligibleTransferTargets.map((channel) => ({
+                value: String(channel.id),
+                label: `${channel.name} (${channel.groups.join(', ')})`,
+              }))}
+              onValueChange={(value) => setTransferTargetId(Number(value))}
+            >
+              <SelectTrigger
+                id={`transfer-account-${transferring.account_id}`}
+                className='w-full'
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {eligibleTransferTargets.map((channel) => (
+                  <SelectItem key={channel.id} value={String(channel.id)}>
+                    {channel.name} ({channel.groups.join(', ')})
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        )}
+      </Dialog>
       <ConfirmDialog
         open={!!removing}
         onOpenChange={(open) => {
           if (!open) setRemoving(null)
         }}
         title={t('Remove account')}
-        desc={t(
-          'This account will be removed from every channel sharing this pool.'
-        )}
+        desc={t('This account will be removed from this channel.')}
         destructive
         isLoading={action.isPending}
         handleConfirm={() => {

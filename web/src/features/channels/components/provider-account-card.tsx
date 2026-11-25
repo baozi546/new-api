@@ -28,6 +28,7 @@ export function ProviderAccountCard(props: {
   disabled: boolean
   onAction: (account: PoolAccount, action: string) => void
   onLogin: (account: PoolAccount) => void
+  onTransfer?: (account: PoolAccount) => void
 }) {
   const { t } = useTranslation()
   const account = props.account
@@ -122,38 +123,44 @@ export function ProviderAccountCard(props: {
         >
           {t('Log in again')}
         </Button>
-        <Button
-          type='button'
-          variant='outline'
-          size='sm'
-          disabled={props.disabled}
-          onClick={() =>
-            props.onAction(
-              account,
-              account.state.disabled ? 'enable' : 'disable'
-            )
-          }
-        >
-          {t(account.state.disabled ? 'Enable' : 'Disable')}
-        </Button>
-        <Button
-          type='button'
-          variant='outline'
-          size='sm'
-          disabled={props.disabled}
-          onClick={() =>
-            props.onAction(
-              account,
-              account.state.degraded ? 'restore' : 'degraded'
-            )
-          }
-        >
-          {t(
-            account.state.degraded
-              ? 'Restore account quality'
-              : 'Move to reduced quality pool'
-          )}
-        </Button>
+        {!account.state.degraded && (
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            disabled={props.disabled}
+            onClick={() =>
+              props.onAction(
+                account,
+                account.state.disabled ? 'enable' : 'disable'
+              )
+            }
+          >
+            {t(account.state.disabled ? 'Enable' : 'Disable')}
+          </Button>
+        )}
+        {account.state.degraded && (
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            disabled={props.disabled}
+            onClick={() => props.onAction(account, 'restore')}
+          >
+            {t('Restore account')}
+          </Button>
+        )}
+        {props.onTransfer && (
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            disabled={props.disabled}
+            onClick={() => props.onTransfer?.(account)}
+          >
+            {t('Move to channel')}
+          </Button>
+        )}
         <Button
           type='button'
           variant='ghost'

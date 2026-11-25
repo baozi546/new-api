@@ -14,6 +14,7 @@ import { LoadingState } from '@/components/loading-state'
 import { Button, buttonVariants } from '@/components/ui/button'
 import {
   Field,
+  FieldDescription,
   FieldError,
   FieldGroup,
   FieldLabel,
@@ -37,8 +38,6 @@ import {
 const createSchema = z.object({
   plugin: z.string().min(1),
   name: z.string().trim().min(1).max(128),
-  models: z.string().trim().min(1),
-  category: z.enum(['plus', 'pro', 'degraded']),
 })
 
 function CreatePoolChannel(props: {
@@ -53,8 +52,6 @@ function CreatePoolChannel(props: {
     defaultValues: {
       plugin: props.plugins[0]?.key || '',
       name: '',
-      models: '',
-      category: 'plus',
     },
   })
   const mutation = useMutation({
@@ -62,12 +59,7 @@ function CreatePoolChannel(props: {
       createPoolChannel({
         plugin: values.plugin,
         name: values.name,
-        groups: [values.category],
-        models: values.models
-          .split(',')
-          .map((value) => value.trim())
-          .filter(Boolean),
-        settings: { category: values.category, concurrency: 1 },
+        settings: { concurrency: 1 },
       }),
     onSuccess: (data) => {
       setOpen(false)
@@ -134,54 +126,11 @@ function CreatePoolChannel(props: {
                 <FieldError>{t('Required')}</FieldError>
               )}
             </Field>
-            <Field>
-              <FieldLabel htmlFor={`${id}-category`}>
-                {t('Account type used by this channel')}
-              </FieldLabel>
-              <Select
-                value={form.watch('category')}
-                items={[
-                  { value: 'plus', label: 'Plus' },
-                  { value: 'pro', label: 'Pro' },
-                  { value: 'degraded', label: t('Reduced quality') },
-                ]}
-                onValueChange={(value) => {
-                  if (
-                    value === 'plus' ||
-                    value === 'pro' ||
-                    value === 'degraded'
-                  )
-                    {form.setValue('category', value)}
-                }}
-              >
-                <SelectTrigger id={`${id}-category`} className='w-full'>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value='plus'>Plus</SelectItem>
-                  <SelectItem value='pro'>Pro</SelectItem>
-                  <SelectItem value='degraded'>
-                    {t('Reduced quality')}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </Field>
-            <p className='text-muted-foreground text-sm'>
-              {t('The customer group automatically matches this account type.')}
-            </p>
-            <Field>
-              <FieldLabel htmlFor={`${id}-models`}>
-                {t('Models (comma separated)')}
-              </FieldLabel>
-              <Input
-                id={`${id}-models`}
-                {...form.register('models')}
-                aria-invalid={!!form.formState.errors.models}
-              />
-              {form.formState.errors.models && (
-                <FieldError>{t('Required')}</FieldError>
+            <FieldDescription>
+              {t(
+                'Models and Plus/Pro account matching are detected automatically after import.'
               )}
-            </Field>
+            </FieldDescription>
           </FieldGroup>
         </form>
       </Dialog>
@@ -235,7 +184,9 @@ export function AccountPools() {
         {current && (
           <div className='space-y-4'>
             <Field>
-              <FieldLabel>{t('Channel and customer groups')}</FieldLabel>
+              <FieldLabel>
+                {t('Target channel for account assignment')}
+              </FieldLabel>
               <Select
                 value={String(current.id)}
                 items={channels.map((channel) => ({
@@ -246,7 +197,7 @@ export function AccountPools() {
               >
                 <SelectTrigger
                   className='w-full sm:w-96'
-                  aria-label={t('Channel and customer groups')}
+                  aria-label={t('Target channel for account assignment')}
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -262,6 +213,8 @@ export function AccountPools() {
             <ProviderPoolPanel
               key={current.id}
               channelId={current.id}
+              channelName={current.name}
+              channels={channels}
               plugin={current.plugin}
             />
           </div>
