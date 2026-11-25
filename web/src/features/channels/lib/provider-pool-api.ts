@@ -22,6 +22,7 @@ export type PoolAccount = {
   state: {
     disabled: boolean
     health?: string
+    last_error?: string
     checked_at?: number
     wrong_answers?: number
     degraded?: boolean

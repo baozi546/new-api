@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 )
 
@@ -37,9 +38,14 @@ func inspectProviderPoolChannel(channel model.Channel, cfg inspectionConfig) err
 		if !service.ProviderAccountUsable(account) {
 			if account.NeedsLogin {
 				mark.Result = "login_required"
+				mark.Reason = "Account login is required"
 			}
 			if account.State.Health == "account_banned" {
 				mark.Result = "account_banned"
+				mark.Reason = "Account was marked as banned"
+			}
+			if mark.Reason == "" {
+				mark.Reason = "Account is disabled"
 			}
 			round.Accounts = append(round.Accounts, mark)
 			continue
@@ -49,6 +55,11 @@ func inspectProviderPoolChannel(channel model.Channel, cfg inspectionConfig) err
 			accountInspectionInput{AccountID: account.AccountID, Group: account.Profile.Category, Prompt: question.Prompt, Effort: cfg.ReasoningEffort})
 		cancel()
 		mark.Result = "inconclusive"
+		mark.Reason = inspectionCallFailureReason(result, &channel)
+		statusCode := result.statusCode
+		if statusCode == 0 && result.newAPIError != nil {
+			statusCode = result.newAPIError.StatusCode
+		}
 		if result.localErr == nil && result.newAPIError == nil {
 			var response struct {
 				Choices []struct {
@@ -62,12 +73,14 @@ func inspectProviderPoolChannel(channel model.Channel, cfg inspectionConfig) err
 				if strings.TrimSpace(response.Choices[0].Message.Content) == strings.TrimSpace(question.Answer) {
 					mark.Result = "passed"
 				}
+			} else {
+				mark.Reason = "Inspection response was not a valid chat completion"
 			}
-		} else if result.statusCode == 429 {
+		} else if statusCode == http.StatusTooManyRequests {
 			mark.Result = "rate_limited"
-		} else if result.statusCode == http.StatusUnauthorized {
+		} else if statusCode == http.StatusUnauthorized {
 			mark.Result = "login_required"
-		} else if result.statusCode == http.StatusForbidden && result.context != nil && result.context.GetBool("provider_pool_rejected") {
+		} else if statusCode == http.StatusForbidden && result.context != nil && result.context.GetBool("provider_pool_rejected") {
 			mark.Result = "account_banned"
 		}
 		current, findErr := service.FindProviderPoolAccount(context.Background(), &channel, account.AccountID)
@@ -80,6 +93,7 @@ func inspectProviderPoolChannel(channel model.Channel, cfg inspectionConfig) err
 		}
 		err := service.UpdateProviderAccount(account.OwnerID, account.AccountID, func(state *model.ProviderAccountState) {
 			state.Health = mark.Result
+			state.LastError = mark.Reason
 			state.CheckedAt = time.Now().Unix()
 			if mark.Result == "login_required" || mark.Result == "account_banned" {
 				state.Disabled = true
@@ -109,4 +123,23 @@ func inspectProviderPoolChannel(channel model.Channel, cfg inspectionConfig) err
 		return err
 	}
 	return model.UpdateOptionsBulk(map[string]string{inspectionKey(&channel, "last"): string(raw)})
+}
+
+func inspectionCallFailureReason(result testResult, channel *model.Channel) string {
+	var reason string
+	if result.newAPIError != nil {
+		reason = result.newAPIError.MaskSensitiveErrorWithStatusCode(channel.GetBaseURL())
+	} else if result.localErr != nil {
+		reason = types.NewError(result.localErr, "").MaskSensitiveErrorWithStatusCode(channel.GetBaseURL())
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return ""
+	}
+	const maxReasonRunes = 512
+	runes := []rune(reason)
+	if len(runes) > maxReasonRunes {
+		reason = string(runes[:maxReasonRunes]) + "…"
+	}
+	return reason
 }

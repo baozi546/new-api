@@ -135,12 +135,13 @@ export function convertResponse(ctx, response) {
 
 export function convertStreamEvent(ctx, input) {
   if (input.done) return { events: [] };
-  if (input.data === "[DONE]") return { events: [] };
+  const raw = String(input.data || "").trim();
+  if (!raw || raw === "[DONE]") return {};
   let event;
-  try { event = JSON.parse(input.data); } catch (_) { return { error: { status: 502, code: "invalid_stream", message: "Invalid upstream response event" } }; }
+  try { event = JSON.parse(raw); } catch (_) { return { error: { status: 502, code: "invalid_stream", message: "Invalid upstream response event" } }; }
   if (event.type === "error" || event.type === "response.failed") {
     const error = event.error || (event.response && event.response.error) || {};
-    return { error: { status: 502, code: String(error.code || "upstream_error"), message: "Upstream generation failed" } };
+    return { error: { status: 502, code: String(error.code || "upstream_error"), message: String(error.message || "Upstream generation failed").slice(0, 256) } };
   }
   if (!ctx.state.clientStream) {
     if (event.type === "response.completed" && event.response) return { body: event.response };

@@ -352,6 +352,7 @@ func OperateProviderAccount(c *gin.Context) {
 				state.Degraded = false
 				state.WrongAnswers = 0
 				state.Disabled = false
+				state.LastError = ""
 			}
 		})
 	case "remove":

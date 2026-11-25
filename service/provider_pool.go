@@ -208,8 +208,10 @@ func MarkProviderPoolProblem(ownerID int, line string, status int) error {
 			}
 			state := channel.ChannelInfo.ProviderAccounts[credential.AccountID]
 			state.Health = "account_banned"
+			state.LastError = fmt.Sprintf("HTTP %d: account was rejected by upstream", status)
 			if status == 401 {
 				state.Health = "login_required"
+				state.LastError = "HTTP 401: account login is required"
 			}
 			state.CheckedAt = time.Now().Unix()
 			channel.ChannelInfo.ProviderAccounts[credential.AccountID] = state

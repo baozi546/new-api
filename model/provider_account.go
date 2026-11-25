@@ -13,6 +13,7 @@ import (
 type ProviderAccountState struct {
 	Disabled     bool                    `json:"disabled"`
 	Health       string                  `json:"health,omitempty"`
+	LastError    string                  `json:"last_error,omitempty"`
 	CheckedAt    int64                   `json:"checked_at,omitempty"`
 	WrongAnswers int                     `json:"wrong_answers,omitempty"`
 	Degraded     bool                    `json:"degraded,omitempty"`

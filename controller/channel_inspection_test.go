@@ -56,7 +56,7 @@ func TestChannelInspectionsUseProviderPoolAndPublishSafeResults(t *testing.T) {
 		Model:  "inspection-model",
 		Time:   100,
 		Accounts: []accountMark{{
-			ID: "private-account-id", Label: "private@example.test", Time: 100, Result: "passed", Number: 1,
+			ID: "private-account-id", Label: "private@example.test", Time: 100, Reason: "502, Invalid upstream response event", Result: "inconclusive", Number: 1,
 		}},
 	})
 	require.NoError(t, err)
@@ -72,8 +72,8 @@ func TestChannelInspectionsUseProviderPoolAndPublishSafeResults(t *testing.T) {
 	require.True(t, public.Success, publicJSON)
 	require.Contains(t, publicJSON, "Customer Pro")
 	require.Contains(t, publicJSON, `"groups":["pro"]`)
-	require.Contains(t, publicJSON, "passed")
-	for _, secret := range []string{"private-account-id", "private@example.test", "private prompt", "secret expected", "inspection-model", "Legacy CPA"} {
+	require.Contains(t, publicJSON, "inconclusive")
+	for _, secret := range []string{"private-account-id", "private@example.test", "private prompt", "secret expected", "inspection-model", "Invalid upstream response event", "Legacy CPA"} {
 		require.NotContains(t, publicJSON, secret)
 	}
 
@@ -81,6 +81,7 @@ func TestChannelInspectionsUseProviderPoolAndPublishSafeResults(t *testing.T) {
 	require.True(t, admin.Success, adminJSON)
 	require.Contains(t, adminJSON, "private@example.test")
 	require.Contains(t, adminJSON, "private prompt")
+	require.Contains(t, adminJSON, "Invalid upstream response event")
 	require.Contains(t, adminJSON, "Pro account pool")
 	require.NotContains(t, adminJSON, "Legacy CPA")
 }

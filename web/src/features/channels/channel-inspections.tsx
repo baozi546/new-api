@@ -60,6 +60,7 @@ type Card = {
   accounts: {
     code: string
     label?: string
+    reason?: string
     result: string
     number: number
     time: number
@@ -385,8 +386,15 @@ export function ChannelInspections() {
                           key={a.code}
                           className='flex flex-wrap justify-between gap-2 py-2 text-sm'
                         >
-                          <span>{a.label || `#${a.code}`}</span>
-                          <span>
+                          <div className='min-w-0'>
+                            <p>{a.label || `#${a.code}`}</p>
+                            {manage && a.reason && (
+                              <p className='text-muted-foreground mt-1 break-words'>
+                                {t('Failure reason')}: {a.reason}
+                              </p>
+                            )}
+                          </div>
+                          <span className='shrink-0'>
                             {t(outcomes[a.result] || 'Inconclusive')}
                             {a.time > 0 &&
                               ` · ${formatTimestampToDate(a.time)}`}

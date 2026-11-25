@@ -34,6 +34,7 @@ type inspectionConfig struct {
 type accountMark struct {
 	ID     string `json:"id"`
 	Label  string `json:"label"`
+	Reason string `json:"reason,omitempty"`
 	Time   int64  `json:"time"`
 	Result string `json:"result"`
 	Number int    `json:"number"`
@@ -140,6 +141,9 @@ func listChannelInspections(c *gin.Context, admin bool) {
 			card := gin.H{"code": common.GenerateHMAC(fmt.Sprintf("quality/%d/%s", ch.Id, a.ID))[:10], "time": a.Time, "result": a.Result, "number": a.Number}
 			if admin {
 				card["label"] = a.Label
+				if a.Reason != "" {
+					card["reason"] = a.Reason
+				}
 			}
 			cards = append(cards, card)
 		}

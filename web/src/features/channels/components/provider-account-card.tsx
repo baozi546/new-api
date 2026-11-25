@@ -97,6 +97,11 @@ export function ProviderAccountCard(props: {
               : ''}
           </p>
         )}
+        {account.state.last_error && (
+          <p className='text-muted-foreground text-xs break-words'>
+            {t('Failure reason')}: {account.state.last_error}
+          </p>
+        )}
         <ItemDescription>
           {t('Channels and groups')} ·{' '}
           {account.channels

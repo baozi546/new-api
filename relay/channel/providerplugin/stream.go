@@ -354,13 +354,20 @@ func (s *lineSource) next() (event jsplugin.StreamEvent, more bool, err error) {
 		}
 		atEOF := readErr == io.EOF
 		if !s.sse {
-			if strings.TrimSpace(line) != "" {
-				return jsplugin.StreamEvent{Data: line}, true, nil
+			line = strings.TrimPrefix(line, "\uFEFF")
+			field, _, hasSeparator := strings.Cut(line, ":")
+			isSSEField := line != "" && line[0] == ':' || hasSeparator && (field == "data" || field == "event" || field == "id" || field == "retry")
+			if isSSEField {
+				s.sse = true
+			} else {
+				if strings.TrimSpace(line) != "" {
+					return jsplugin.StreamEvent{Data: line}, true, nil
+				}
+				if atEOF {
+					return jsplugin.StreamEvent{}, false, nil
+				}
+				continue
 			}
-			if atEOF {
-				return jsplugin.StreamEvent{}, false, nil
-			}
-			continue
 		}
 		switch {
 		case line == "":
