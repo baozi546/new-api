@@ -617,9 +617,10 @@ test('provider selection tolerates plugin options with null models', async () =>
 
   await user.click(screen.getByRole('button', { name: 'Open channel' }))
   const pluginOption = await screen.findByRole('option', {
-    name: /No-model plugin.*0 models/,
+    name: /No-model plugin/,
   })
   expect(pluginOption).toBeVisible()
+  expect(within(pluginOption).getByText('0 models')).toBeVisible()
   await user.click(pluginOption)
 
   expect(screen.getByLabelText('API Key *')).toBeVisible()
