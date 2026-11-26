@@ -271,3 +271,111 @@ func TestProviderPoolSettingsOnlyChangesConcurrency(t *testing.T) {
 	}
 	require.ElementsMatch(t, []string{"svip", "pro"}, groups)
 }
+
+func TestProviderAccountMatchesSupportsNonGPTProviders(t *testing.T) {
+	claudeAcct := ProviderPoolAccount{
+		PluginKey: "claude-account-pool",
+		Profile:   jsplugin.AccountProfile{Plan: "max", Category: "max", PlanVerified: true},
+	}
+	require.True(t, ProviderAccountMatches(claudeAcct, "max", ""))
+	require.True(t, ProviderAccountMatches(claudeAcct, "", ""))
+	require.False(t, ProviderAccountMatches(claudeAcct, "team", ""))
+
+	genericAcct := ProviderPoolAccount{
+		PluginKey: "gemini-account-pool",
+		Profile:   jsplugin.AccountProfile{Plan: "standard", Category: "default", PlanVerified: false},
+	}
+	require.True(t, ProviderAccountMatches(genericAcct, "default", ""))
+	require.True(t, ProviderAccountMatches(genericAcct, "svip", ""))
+
+	// GPT account pools retain strict Plus/Pro isolation.
+	gptPlus := ProviderPoolAccount{
+		PluginKey: "gpt-account-pool",
+		Profile:   jsplugin.AccountProfile{Plan: "plus", Category: "plus", PlanVerified: true},
+	}
+	require.True(t, ProviderAccountMatches(gptPlus, "plus", ""))
+	require.False(t, ProviderAccountMatches(gptPlus, "pro", ""))
+	require.True(t, ProviderAccountMatches(gptPlus, "vip", ""))
+}
+
+func TestResetProviderPoolAccountQuotaCallsPluginHookAndRefreshes(t *testing.T) {
+	useProviderPluginDatabase(t)
+	const pluginKey = "provider-pool-reset-test"
+	const resetPlugin = `export const meta = {
+  apiVersion: 1,
+  key: "provider-pool-reset-test",
+  name: { en: "Reset test pool", zh: "重置测试号池" },
+  version: "1.0.0",
+  author: { name: "Test" },
+  accountPool: true,
+  relay: [{ incoming_path: "/v1/chat/completions", upstream_path: "/chat" }],
+};
+export function login() { return { type: "fields", fields: [] }; }
+export function resetQuota() { return { code: "reset", message: "Quota reset applied" }; }
+export function scheduled(ctx) {
+  const next = Object.assign({}, ctx.credential || {}, {
+    plan: "pro",
+    plan_verified: true,
+    subscription_expires_at: 1893456000,
+    reset_credits: { available_count: 0, applicable_available_count: 0, credits: [] },
+    quota_checked_at: 200,
+  });
+  return { next: 300, credential: next };
+}
+export function describeAccount(ctx) {
+  const d = ctx.credential || {};
+  return {
+    plan: d.plan || "pro",
+    category: "pro",
+    plan_verified: true,
+    subscription_expires_at: d.subscription_expires_at || 0,
+    supports_reset_credits: true,
+    reset_credits: d.reset_credits || { available_count: 1, applicable_available_count: 1, credits: [] },
+    windows: [],
+    quota_checked_at: d.quota_checked_at || 100,
+    quota_error: "",
+  };
+}`
+	_, err := jsplugin.DefaultRegistry.Register(resetPlugin, jsplugin.Options{})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, jsplugin.DefaultRegistry.Unregister(pluginKey)) })
+
+	line, err := (jsplugin.Credential{
+		Plugin:    pluginKey,
+		AccountID: "reset-acct-1",
+		Label:     "reset@example.test",
+		Data:      []byte(`{"access_token":"tok"}`),
+	}).Line()
+	require.NoError(t, err)
+	channel := createProviderPoolTestChannel(t, pluginKey, "https://upstream.example", "Reset pool", "pro", 1, line)
+	channel.ChannelInfo.ProviderAccounts = map[string]model.ProviderAccountState{
+		"reset-acct-1": {
+			Health:    "rate_limited",
+			LastError: "HTTP 429",
+			Profile: jsplugin.AccountProfile{
+				Plan: "pro", Category: "pro", PlanVerified: true,
+				SupportsResetCredits: true,
+				ResetCredits:         &jsplugin.AccountResetCredits{AvailableCount: 1, ApplicableAvailableCount: 1},
+			},
+		},
+	}
+	require.NoError(t, model.DB.Model(channel).Update("channel_info", channel.ChannelInfo).Error)
+	model.InitChannelCache()
+
+	account, err := FindProviderPoolAccount(context.Background(), channel, "reset-acct-1")
+	require.NoError(t, err)
+	require.True(t, account.SupportsResetQuota)
+
+	res, err := ResetProviderPoolAccountQuota(context.Background(), account)
+	require.NoError(t, err)
+	require.Equal(t, "reset", res.Code)
+
+	stored, err := model.GetChannelById(channel.Id, true)
+	require.NoError(t, err)
+	state := stored.ChannelInfo.ProviderAccounts["reset-acct-1"]
+	require.Empty(t, state.Health)
+	require.Empty(t, state.LastError)
+	require.Equal(t, int64(1893456000), state.Profile.SubscriptionExpiresAt)
+	require.NotNil(t, state.Profile.ResetCredits)
+	require.Equal(t, 0, state.Profile.ResetCredits.AvailableCount)
+}

@@ -222,8 +222,12 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	c.Set("group", group)
 
 	if len(inspection) > 0 {
-		c.Set("group", inspection[0].Group)
-		c.Set("provider_pool_fixed_account", inspection[0].AccountID)
+		if strings.TrimSpace(inspection[0].Group) != "" {
+			c.Set("group", inspection[0].Group)
+		}
+		if strings.TrimSpace(inspection[0].AccountID) != "" {
+			c.Set("provider_pool_fixed_account", inspection[0].AccountID)
+		}
 		if inspection[0].ForceInspect {
 			c.Set("provider_pool_force_inspect", true)
 		}

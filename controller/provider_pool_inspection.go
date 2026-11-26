@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -155,15 +156,7 @@ func evaluateProviderPoolAccountInspection(
 		statusCode = result.newAPIError.StatusCode
 	}
 	if result.localErr == nil && result.newAPIError == nil {
-		var response struct {
-			Choices []struct {
-				Message struct {
-					Content string `json:"content"`
-				} `json:"message"`
-			} `json:"choices"`
-		}
-		if common.Unmarshal(result.response, &response) == nil && len(response.Choices) == 1 {
-			actual := response.Choices[0].Message.Content
+		if actual, ok := extractInspectionReplyText(result.response); ok {
 			if inspectionAnswerMatches(actual, question.Answer) {
 				mark.Result = "passed"
 				mark.Reason = ""
@@ -296,4 +289,157 @@ func inspectionMismatchReason(expected, actual string) string {
 		actualText = string(runes[:maxActualRunes]) + "…"
 	}
 	return fmt.Sprintf("expected %q, got %q", expectedText, actualText)
+}
+
+func extractInspectionReplyText(raw []byte) (string, bool) {
+	if len(raw) == 0 {
+		return "", false
+	}
+	var payload struct {
+		Choices []struct {
+			Message struct {
+				Content json.RawMessage `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Content []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		} `json:"content"`
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+		OutputText string `json:"output_text"`
+		Output     []struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		} `json:"output"`
+	}
+	if common.Unmarshal(raw, &payload) != nil {
+		return "", false
+	}
+	if len(payload.Choices) > 0 {
+		msgRaw := payload.Choices[0].Message.Content
+		var text string
+		if len(msgRaw) > 0 && common.Unmarshal(msgRaw, &text) == nil {
+			return text, true
+		}
+		var parts []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if len(msgRaw) > 0 && common.Unmarshal(msgRaw, &parts) == nil {
+			var b strings.Builder
+			for _, part := range parts {
+				if part.Text != "" {
+					b.WriteString(part.Text)
+				}
+			}
+			return b.String(), true
+		}
+	}
+	if len(payload.Content) > 0 {
+		var b strings.Builder
+		for _, block := range payload.Content {
+			if block.Text != "" {
+				b.WriteString(block.Text)
+			}
+		}
+		return b.String(), true
+	}
+	if len(payload.Candidates) > 0 {
+		var b strings.Builder
+		for _, part := range payload.Candidates[0].Content.Parts {
+			if part.Text != "" {
+				b.WriteString(part.Text)
+			}
+		}
+		return b.String(), true
+	}
+	if payload.OutputText != "" {
+		return payload.OutputText, true
+	}
+	if len(payload.Output) > 0 {
+		var b strings.Builder
+		for _, item := range payload.Output {
+			for _, part := range item.Content {
+				if part.Text != "" {
+					b.WriteString(part.Text)
+				}
+			}
+		}
+		return b.String(), true
+	}
+	return "", false
+}
+
+// inspectStandardChannel runs one inspection round against any non-account-pool
+// testable channel (e.g. OpenAI, Claude/Anthropic, Gemini, DeepSeek, New API,
+// custom channels) using the same rotating question & answer matching logic.
+func inspectStandardChannel(channel model.Channel, cfg inspectionConfig) error {
+	if !cfg.valid() || cfg.Model == "" {
+		return errors.New("invalid inspection settings")
+	}
+	var previous inspectionRound
+	readInspection(&channel, "last", &previous)
+	index := previous.Sequence % len(cfg.Questions)
+	question := cfg.Questions[index]
+	round := inspectionRound{
+		Sequence: previous.Sequence + 1,
+		Prompt:   question.Prompt,
+		Model:    cfg.Model,
+		Accounts: []accountMark{},
+	}
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		return err
+	}
+	mark := accountMark{
+		ID:     fmt.Sprintf("channel-%d", channel.Id),
+		Label:  channel.Name,
+		Time:   time.Now().Unix(),
+		Number: index + 1,
+		Result: "inconclusive",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	result := testChannel(ctx, &channel, testUserID, cfg.Model, string(constant.EndpointTypeOpenAI), false,
+		accountInspectionInput{
+			Prompt: question.Prompt,
+			Effort: cfg.ReasoningEffort,
+		})
+	cancel()
+	mark.Time = time.Now().Unix()
+	mark.Reason = inspectionCallFailureReason(result, &channel)
+	statusCode := result.statusCode
+	if statusCode == 0 && result.newAPIError != nil {
+		statusCode = result.newAPIError.StatusCode
+	}
+	if result.localErr == nil && result.newAPIError == nil {
+		if actual, ok := extractInspectionReplyText(result.response); ok {
+			if inspectionAnswerMatches(actual, question.Answer) {
+				mark.Result = "passed"
+				mark.Reason = ""
+			} else {
+				mark.Result = "wrong_answer"
+				mark.Reason = inspectionMismatchReason(question.Answer, actual)
+			}
+		} else {
+			mark.Reason = "Inspection response was not a valid chat completion"
+		}
+	} else if statusCode == http.StatusTooManyRequests {
+		mark.Result = "rate_limited"
+	} else if statusCode == http.StatusUnauthorized {
+		mark.Result = "login_required"
+	}
+	round.Accounts = append(round.Accounts, mark)
+	round.Time = time.Now().Unix()
+	raw, err := common.Marshal(round)
+	if err != nil {
+		return err
+	}
+	return model.UpdateOptionsBulk(map[string]string{inspectionKey(&channel, "last"): string(raw)})
 }

@@ -1,7 +1,8 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { useId, useState } from 'react'
+import { Layers, Plus } from 'lucide-react'
+import { useId, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
@@ -27,24 +28,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { resolveLocalizedText } from '@/lib/localized-text'
+import { cn } from '@/lib/utils'
 
 import { ProviderPoolPanel } from './components/provider-pool-panel'
 import {
   createPoolChannel,
   listPoolChannels,
   poolQueryKeys,
+  type PoolPlugin,
 } from './lib/provider-pool-api'
+import { getProviderVisual } from './lib/provider-pool-meta'
 
 const createSchema = z.object({
   plugin: z.string().min(1),
   name: z.string().trim().min(1).max(128),
+  groups: z.string().optional(),
 })
 
 function CreatePoolChannel(props: {
-  plugins: { key: string; name: string }[]
+  plugins: PoolPlugin[]
   onCreated: (id: number) => void
 }) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const [open, setOpen] = useState(false)
   const id = useId()
   const form = useForm<z.infer<typeof createSchema>>({
@@ -52,15 +58,25 @@ function CreatePoolChannel(props: {
     defaultValues: {
       plugin: props.plugins[0]?.key || '',
       name: '',
+      groups: '',
     },
   })
+  const selectedPlugin = form.watch('plugin')
+  const isGpt = selectedPlugin === 'gpt-account-pool'
+
   const mutation = useMutation({
-    mutationFn: (values: z.infer<typeof createSchema>) =>
-      createPoolChannel({
+    mutationFn: (values: z.infer<typeof createSchema>) => {
+      const parsedGroups = (values.groups || '')
+        .split(/[,，\s]+/)
+        .map((g) => g.trim())
+        .filter(Boolean)
+      return createPoolChannel({
         plugin: values.plugin,
         name: values.name,
+        groups: parsedGroups.length > 0 ? parsedGroups : undefined,
         settings: { concurrency: 1 },
-      }),
+      })
+    },
     onSuccess: (data) => {
       setOpen(false)
       form.reset()
@@ -70,6 +86,7 @@ function CreatePoolChannel(props: {
   return (
     <>
       <Button disabled={!props.plugins.length} onClick={() => setOpen(true)}>
+        <Plus className='size-4' />
         {t('Create account pool channel')}
       </Button>
       <Dialog
@@ -94,10 +111,12 @@ function CreatePoolChannel(props: {
             <Field>
               <FieldLabel htmlFor={`${id}-plugin`}>{t('Provider')}</FieldLabel>
               <Select
-                value={form.watch('plugin')}
+                value={selectedPlugin}
                 items={props.plugins.map((plugin) => ({
                   value: plugin.key,
-                  label: plugin.name,
+                  label:
+                    resolveLocalizedText(plugin.name, i18n.language) ||
+                    plugin.key,
                 }))}
                 onValueChange={(value) => form.setValue('plugin', value || '')}
               >
@@ -107,7 +126,8 @@ function CreatePoolChannel(props: {
                 <SelectContent>
                   {props.plugins.map((plugin) => (
                     <SelectItem key={plugin.key} value={plugin.key}>
-                      {plugin.name}
+                      {resolveLocalizedText(plugin.name, i18n.language) ||
+                        plugin.key}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -126,11 +146,23 @@ function CreatePoolChannel(props: {
                 <FieldError>{t('Required')}</FieldError>
               )}
             </Field>
-            <FieldDescription>
-              {t(
-                'Models and Plus/Pro account matching are detected automatically after import.'
-              )}
-            </FieldDescription>
+            <Field>
+              <FieldLabel htmlFor={`${id}-groups`}>
+                {t('Customer groups (optional)')}
+              </FieldLabel>
+              <Input
+                id={`${id}-groups`}
+                placeholder={isGpt ? 'plus, pro' : 'default'}
+                {...form.register('groups')}
+              />
+              <FieldDescription>
+                {t(
+                  isGpt
+                    ? 'Models and Plus/Pro account matching are detected automatically after import.'
+                    : 'Leave blank to use the provider default group. Accounts and models sync after login or import.'
+                )}
+              </FieldDescription>
+            </Field>
           </FieldGroup>
         </form>
       </Dialog>
@@ -139,16 +171,68 @@ function CreatePoolChannel(props: {
 }
 
 export function AccountPools() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const queryClient = useQueryClient()
-  const [selected, setSelected] = useState<number | null>(null)
+  const [providerFilter, setProviderFilter] = useState<string>('all')
+  // null means CPA-style "All accounts" unified view across channels
+  const [selectedChannelId, setSelectedChannelId] = useState<number | null>(
+    null
+  )
+
   const query = useQuery({
     queryKey: poolQueryKeys.channels,
     queryFn: listPoolChannels,
   })
+
   const channels = query.data?.channels || []
-  const current =
-    channels.find((channel) => channel.id === selected) || channels[0]
+  const plugins = query.data?.plugins || []
+
+  const providerTabs = useMemo(() => {
+    const map = new Map<
+      string,
+      { key: string; name: string; channelCount: number; accountCount: number }
+    >()
+    for (const plugin of plugins) {
+      map.set(plugin.key, {
+        key: plugin.key,
+        name: resolveLocalizedText(plugin.name, i18n.language) || plugin.key,
+        channelCount: 0,
+        accountCount: 0,
+      })
+    }
+    for (const ch of channels) {
+      const existing = map.get(ch.plugin.key) || {
+        key: ch.plugin.key,
+        name:
+          resolveLocalizedText(ch.plugin.name, i18n.language) || ch.plugin.key,
+        channelCount: 0,
+        accountCount: 0,
+      }
+      existing.channelCount += 1
+      existing.accountCount += ch.account_count ?? 0
+      map.set(ch.plugin.key, existing)
+    }
+    return Array.from(map.values())
+  }, [channels, plugins, i18n.language])
+
+  const filteredChannels = useMemo(
+    () =>
+      providerFilter === 'all'
+        ? channels
+        : channels.filter((ch) => ch.plugin.key === providerFilter),
+    [channels, providerFilter]
+  )
+
+  const currentChannel =
+    selectedChannelId !== null
+      ? filteredChannels.find((ch) => ch.id === selectedChannelId) || null
+      : null
+
+  const totalAccountsInScope = filteredChannels.reduce(
+    (sum, ch) => sum + (ch.account_count ?? 0),
+    0
+  )
+
   return (
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Account pools')}</SectionPageLayout.Title>
@@ -157,7 +241,7 @@ export function AccountPools() {
           <CreatePoolChannel
             plugins={query.data.plugins}
             onCreated={(id) => {
-              setSelected(id)
+              setSelectedChannelId(id)
               void queryClient.invalidateQueries({
                 queryKey: poolQueryKeys.channels,
               })
@@ -181,41 +265,136 @@ export function AccountPools() {
             title={t('Create a channel to start managing account pools')}
           />
         )}
-        {current && (
+        {channels.length > 0 && (
           <div className='space-y-4'>
-            <Field>
-              <FieldLabel>
-                {t('Target channel for account assignment')}
-              </FieldLabel>
-              <Select
-                value={String(current.id)}
-                items={channels.map((channel) => ({
-                  value: String(channel.id),
-                  label: `${channel.name} (${channel.groups.join(', ')})`,
-                }))}
-                onValueChange={(value) => setSelected(Number(value))}
-              >
-                <SelectTrigger
-                  className='w-full sm:w-96'
-                  aria-label={t('Target channel for account assignment')}
+            {/* CPA-style Multi-Provider & Channel Tab Bar */}
+            <div className='space-y-2.5'>
+              {providerTabs.length > 1 && (
+                <div className='flex flex-wrap items-center gap-1.5'>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setProviderFilter('all')
+                      setSelectedChannelId(null)
+                    }}
+                    className={cn(
+                      'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                      providerFilter === 'all'
+                        ? 'border-primary bg-primary text-primary-foreground'
+                        : 'border-border bg-card hover:bg-muted'
+                    )}
+                  >
+                    <Layers className='size-3.5' />
+                    {t('All providers')}
+                  </button>
+                  {providerTabs.map((prov) => {
+                    const visual = getProviderVisual(prov.key)
+                    const active = providerFilter === prov.key
+                    return (
+                      <button
+                        key={prov.key}
+                        type='button'
+                        onClick={() => {
+                          setProviderFilter(prov.key)
+                          setSelectedChannelId(null)
+                        }}
+                        className={cn(
+                          'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+                          active
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-border bg-card hover:bg-muted'
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'size-2 rounded-full',
+                            active ? 'bg-primary-foreground' : visual.dotClass
+                          )}
+                        />
+                        {prov.name}
+                        <span className='opacity-75'>
+                          ({prov.accountCount})
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Channel switcher pills: All pools + individual channels */}
+              <div className='flex flex-wrap items-center gap-2'>
+                <button
+                  type='button'
+                  onClick={() => setSelectedChannelId(null)}
+                  aria-pressed={currentChannel === null}
+                  className={cn(
+                    'inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all',
+                    currentChannel === null
+                      ? 'border-primary bg-primary/10 text-primary ring-primary/30 ring-1'
+                      : 'border-border bg-card text-foreground/80 hover:bg-muted'
+                  )}
                 >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {channels.map((channel) => (
-                    <SelectItem key={channel.id} value={String(channel.id)}>
-                      {channel.name} ({channel.groups.join(', ')})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Field>
+                  <Layers className='size-3.5' />
+                  <span>{t('All pools')}</span>
+                  <span className='bg-background/80 rounded-full px-1.5 py-px font-mono text-[11px]'>
+                    {totalAccountsInScope}
+                  </span>
+                </button>
+
+                {filteredChannels.map((channel) => {
+                  const visual = getProviderVisual(channel.plugin.key)
+                  const active = currentChannel?.id === channel.id
+                  const problemCount = channel.problem_count ?? 0
+                  return (
+                    <button
+                      key={channel.id}
+                      type='button'
+                      onClick={() => setSelectedChannelId(channel.id)}
+                      aria-pressed={active}
+                      className={cn(
+                        'inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all',
+                        active
+                          ? 'border-primary bg-primary/10 text-primary ring-primary/30 ring-1'
+                          : 'border-border bg-card text-foreground/80 hover:bg-muted'
+                      )}
+                    >
+                      <span
+                        className={cn('size-2 rounded-full', visual.dotClass)}
+                      />
+                      <span>{channel.name}</span>
+                      {channel.groups.length > 0 && (
+                        <span className='text-muted-foreground text-[10px]'>
+                          ({channel.groups.join(', ')})
+                        </span>
+                      )}
+                      <span className='bg-background/80 rounded-full px-1.5 py-px font-mono text-[11px]'>
+                        {channel.account_count ?? 0}
+                      </span>
+                      {problemCount > 0 && (
+                        <span className='rounded-full bg-red-500/15 px-1.5 py-px font-mono text-[10px] font-semibold text-red-600 dark:text-red-400'>
+                          {problemCount}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
             <ProviderPoolPanel
-              key={current.id}
-              channelId={current.id}
-              channelName={current.name}
+              key={
+                currentChannel
+                  ? `ch-${currentChannel.id}`
+                  : `all-${providerFilter}`
+              }
+              viewAll={currentChannel === null}
+              pluginFilter={
+                providerFilter === 'all' ? undefined : providerFilter
+              }
+              channelId={currentChannel?.id ?? null}
+              channelName={currentChannel?.name || ''}
               channels={channels}
-              plugin={current.plugin}
+              plugin={currentChannel?.plugin}
             />
           </div>
         )}

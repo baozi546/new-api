@@ -80,27 +80,138 @@ func (cfg inspectionConfig) valid() bool {
 	}
 	return true
 }
+func isInspectableChannel(ch *model.Channel) bool {
+	if ch == nil {
+		return false
+	}
+	if service.IsProviderPool(ch) {
+		return true
+	}
+	if strings.TrimSpace(ch.CPAPoolID) != "" {
+		return false
+	}
+	switch ch.Type {
+	case constant.ChannelTypeMidjourney,
+		constant.ChannelTypeMidjourneyPlus,
+		constant.ChannelTypeSunoAPI,
+		constant.ChannelTypeKling,
+		constant.ChannelTypeJimeng,
+		constant.ChannelTypeDoubaoVideo,
+		constant.ChannelTypeVidu:
+		return false
+	case constant.ChannelTypeTaskPlugin:
+		plugin, ok := service.PluginOfChannel(ch)
+		return ok && plugin.Meta.HasProviderPart()
+	default:
+		return true
+	}
+}
+
+func isEnrolledStandardChannel(ch *model.Channel) bool {
+	if ch == nil {
+		return false
+	}
+	common.OptionMapRWMutex.RLock()
+	v := common.OptionMap[inspectionKey(ch, "enrolled")]
+	common.OptionMapRWMutex.RUnlock()
+	return v == "true"
+}
+
 func inspectionChannels() ([]model.Channel, error) {
 	var all []model.Channel
-	err := model.DB.Where("type = ?", constant.ChannelTypeTaskPlugin).Order("id").Find(&all).Error
-	result := all[:0]
+	err := model.DB.Order("id").Find(&all).Error
+	result := make([]model.Channel, 0, len(all))
 	for _, ch := range all {
-		if service.IsProviderPool(&ch) {
+		if service.IsProviderPool(&ch) || (isInspectableChannel(&ch) && isEnrolledStandardChannel(&ch)) {
 			result = append(result, ch)
 		}
 	}
 	return result, err
 }
+
 func inspectionTarget(c *gin.Context) *model.Channel {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err == nil && id > 0 {
 		ch, err := model.GetChannelById(id, true)
-		if err == nil && service.IsProviderPool(ch) {
+		if err == nil && (service.IsProviderPool(ch) || (isInspectableChannel(ch) && isEnrolledStandardChannel(ch))) {
 			return ch
 		}
 	}
 	common.ApiErrorT(c, "Invalid parameters")
 	return nil
+}
+
+func ListInspectionCandidates(c *gin.Context) {
+	var all []model.Channel
+	if err := model.DB.Order("id").Find(&all).Error; err != nil {
+		common.ApiErrorT(c, "Request failed")
+		return
+	}
+	rows := make([]gin.H, 0)
+	for _, ch := range all {
+		if service.IsProviderPool(&ch) || !isInspectableChannel(&ch) || isEnrolledStandardChannel(&ch) {
+			continue
+		}
+		rows = append(rows, gin.H{
+			"id":        ch.Id,
+			"name":      ch.Name,
+			"type":      ch.Type,
+			"type_name": constant.GetChannelTypeName(ch.Type),
+			"groups":    ch.GetGroups(),
+			"models":    ch.GetModels(),
+			"status":    ch.Status,
+		})
+	}
+	common.ApiSuccess(c, rows)
+}
+
+func EnrollChannelInspection(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	ch, err := model.GetChannelById(id, true)
+	if err != nil || !isInspectableChannel(ch) {
+		common.ApiErrorT(c, "Channel does not support inspection")
+		return
+	}
+	if !service.IsProviderPool(ch) {
+		if err := model.UpdateOptionsBulk(map[string]string{inspectionKey(ch, "enrolled"): "true"}); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		recordManageAudit(c, "channel.update", map[string]any{"source": "inspection_enroll", "channel_id": ch.Id})
+	}
+	common.ApiSuccess(c, gin.H{"id": ch.Id})
+}
+
+func UnenrollChannelInspection(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil || id <= 0 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	ch, err := model.GetChannelById(id, true)
+	if err != nil || service.IsProviderPool(ch) {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	updates := map[string]string{inspectionKey(ch, "enrolled"): "false"}
+	cfg := inspectionSettings(ch)
+	if cfg.Scheduled || cfg.Published {
+		cfg.Scheduled = false
+		cfg.Published = false
+		if raw, marshalErr := common.Marshal(cfg); marshalErr == nil {
+			updates[inspectionKey(ch, "settings")] = string(raw)
+		}
+	}
+	if err := model.UpdateOptionsBulk(updates); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	recordManageAudit(c, "channel.update", map[string]any{"source": "inspection_unenroll", "channel_id": ch.Id})
+	common.ApiSuccess(c, nil)
 }
 func ListChannelInspections(c *gin.Context)     { listChannelInspections(c, true) }
 func CustomerChannelInspections(c *gin.Context) { listChannelInspections(c, false) }
@@ -148,10 +259,17 @@ func listChannelInspections(c *gin.Context, admin bool) {
 			}
 			cards = append(cards, card)
 		}
-		row := gin.H{"name": ch.Name, "groups": strings.Split(ch.Group, ","), "title": cfg.Title, "accounts": cards, "time": last.Time, "failed": last.Failed, "running": running, "scheduled": cfg.Scheduled, "minutes": cfg.Minutes}
+		isPool := service.IsProviderPool(&ch)
+		row := gin.H{"name": ch.Name, "groups": strings.Split(ch.Group, ","), "title": cfg.Title, "accounts": cards, "time": last.Time, "failed": last.Failed, "running": running, "scheduled": cfg.Scheduled, "minutes": cfg.Minutes, "is_pool": isPool}
 		if admin {
 			row["id"] = ch.Id
 			row["name"] = ch.Name
+			row["channel_type"] = ch.Type
+			row["channel_type_name"] = constant.GetChannelTypeName(ch.Type)
+			if plugin, ok := service.PluginOfChannel(&ch); ok {
+				row["plugin_key"] = plugin.Meta.Key
+				row["plugin_name"] = plugin.Meta.Name
+			}
 			row["settings"] = cfg
 			row["question"] = last.Prompt
 			row["model"] = last.Model
@@ -214,7 +332,10 @@ func launchInspection(ch model.Channel, cfg inspectionConfig) bool {
 	return true
 }
 func inspectChannel(ch model.Channel, cfg inspectionConfig) error {
-	return inspectProviderPoolChannel(ch, cfg)
+	if service.IsProviderPool(&ch) {
+		return inspectProviderPoolChannel(ch, cfg)
+	}
+	return inspectStandardChannel(ch, cfg)
 }
 func StartChannelInspectionSchedule() {
 	go func() {

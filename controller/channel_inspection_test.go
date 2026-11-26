@@ -105,3 +105,69 @@ func TestInspectionAnswerMatchingAndMismatchReason(t *testing.T) {
 	require.True(t, strings.HasPrefix(reason, `expected "21", got "`))
 	require.Contains(t, reason, "…")
 }
+
+func TestStandardChannelsCanEnrollUnenrollAndExtractMultiProviderReplies(t *testing.T) {
+	const pluginKey = "controller-inspection-multi"
+	setupProviderPluginControllerTest(t, pluginKey)
+	require.NoError(t, jsplugin.DefaultRegistry.Unregister(pluginKey))
+	registerProviderPoolImportPlugin(t, pluginKey)
+	require.NoError(t, model.DB.AutoMigrate(&model.Option{}, &model.SystemTask{}))
+
+	previousOptions := common.OptionMap
+	common.OptionMap = map[string]string{}
+	t.Cleanup(func() { common.OptionMap = previousOptions })
+
+	claudeCh := &model.Channel{
+		Id: 31, Type: constant.ChannelTypeAnthropic, Name: "Claude Official", Key: "sk-ant-test",
+		Group: "default", Models: "claude-sonnet-4-5", Status: common.ChannelStatusEnabled,
+	}
+	require.NoError(t, model.DB.Create(claudeCh).Error)
+	model.InitChannelCache()
+
+	// Before enrollment, Claude channel appears in candidates and not in inspection list.
+	resp, raw := callChannelAPI(t, ListInspectionCandidates, "GET", "/candidates", "")
+	require.True(t, resp.Success, raw)
+	require.Contains(t, raw, "Claude Official")
+
+	resp, raw = callChannelAPI(t, ListChannelInspections, "GET", "/", "")
+	require.True(t, resp.Success, raw)
+	require.NotContains(t, raw, "Claude Official")
+
+	// Enroll standard Claude channel.
+	resp, raw = callChannelAPI(t, EnrollChannelInspection, "POST", "/31/enroll", "{}", idParam(claudeCh.Id))
+	require.True(t, resp.Success, raw)
+
+	resp, raw = callChannelAPI(t, ListChannelInspections, "GET", "/", "")
+	require.True(t, resp.Success, raw)
+	require.Contains(t, raw, "Claude Official")
+	require.Contains(t, raw, `"is_pool":false`)
+
+	// Unenroll standard Claude channel.
+	resp, raw = callChannelAPI(t, UnenrollChannelInspection, "DELETE", "/31/enroll", "", idParam(claudeCh.Id))
+	require.True(t, resp.Success, raw)
+
+	resp, raw = callChannelAPI(t, ListChannelInspections, "GET", "/", "")
+	require.True(t, resp.Success, raw)
+	require.NotContains(t, raw, "Claude Official")
+
+	// Multi-provider response reply text extraction.
+	txt, ok := extractInspectionReplyText([]byte(`{"choices":[{"message":{"content":"703"}}]}`))
+	require.True(t, ok)
+	require.Equal(t, "703", txt)
+
+	txt, ok = extractInspectionReplyText([]byte(`{"choices":[{"message":{"content":[{"type":"text","text":"137"}]}}]}`))
+	require.True(t, ok)
+	require.Equal(t, "137", txt)
+
+	txt, ok = extractInspectionReplyText([]byte(`{"content":[{"type":"text","text":"13"}]}`))
+	require.True(t, ok)
+	require.Equal(t, "13", txt)
+
+	txt, ok = extractInspectionReplyText([]byte(`{"candidates":[{"content":{"parts":[{"text":"21"}]}}]}`))
+	require.True(t, ok)
+	require.Equal(t, "21", txt)
+
+	txt, ok = extractInspectionReplyText([]byte(`{"output_text":"42"}`))
+	require.True(t, ok)
+	require.Equal(t, "42", txt)
+}

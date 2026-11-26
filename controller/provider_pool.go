@@ -17,6 +17,14 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func providerAccountHasIssue(account service.ProviderPoolAccount) bool {
+	return account.State.Disabled ||
+		account.NeedsLogin ||
+		account.State.Degraded ||
+		account.Profile.QuotaError != "" ||
+		(account.State.Health != "" && account.State.Health != "passed")
+}
+
 func ListProviderAccountPools(c *gin.Context) {
 	var channels []*model.Channel
 	if err := model.DB.Where("type = ?", constant.ChannelTypeTaskPlugin).Order("id").Find(&channels).Error; err != nil {
@@ -29,16 +37,67 @@ func ListProviderAccountPools(c *gin.Context) {
 		if !ok || !plugin.Meta.AccountPool {
 			continue
 		}
-		rows = append(rows, gin.H{"id": channel.Id, "name": channel.Name, "groups": channel.GetGroups(),
-			"plugin": gin.H{"key": plugin.Meta.Key, "name": plugin.Meta.Name}, "models": channel.GetModels()})
+		accounts, _ := service.ListProviderPoolAccounts(c.Request.Context(), channel)
+		activeCount, problemCount, disabledCount := 0, 0, 0
+		for _, acct := range accounts {
+			if acct.State.Disabled {
+				disabledCount++
+			}
+			if providerAccountHasIssue(acct) {
+				problemCount++
+			} else {
+				activeCount++
+			}
+		}
+		rows = append(rows, gin.H{
+			"id":                   channel.Id,
+			"name":                 channel.Name,
+			"groups":               channel.GetGroups(),
+			"plugin":               gin.H{"key": plugin.Meta.Key, "name": plugin.Meta.Name, "supports_reset_quota": plugin.HasProviderHook("resetQuota")},
+			"models":               channel.GetModels(),
+			"supports_reset_quota": plugin.HasProviderHook("resetQuota"),
+			"account_count":        len(accounts),
+			"active_count":         activeCount,
+			"problem_count":        problemCount,
+			"disabled_count":       disabledCount,
+		})
 	}
 	available := make([]gin.H, 0)
 	for _, plugin := range jsplugin.DefaultRegistry.Generation().Plugins() {
 		if plugin.Meta.AccountPool {
-			available = append(available, gin.H{"key": plugin.Meta.Key, "name": plugin.Meta.Name})
+			available = append(available, gin.H{
+				"key":                  plugin.Meta.Key,
+				"name":                 plugin.Meta.Name,
+				"supports_reset_quota": plugin.HasProviderHook("resetQuota"),
+			})
 		}
 	}
 	common.ApiSuccess(c, gin.H{"channels": rows, "plugins": available})
+}
+
+func GetAllProviderAccountPools(c *gin.Context) {
+	var channels []*model.Channel
+	if err := model.DB.Where("type = ?", constant.ChannelTypeTaskPlugin).Order("id").Find(&channels).Error; err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pluginFilter := strings.TrimSpace(c.Query("plugin"))
+	items := make([]service.ProviderPoolAccount, 0)
+	for _, channel := range channels {
+		plugin, ok := service.PluginOfChannel(channel)
+		if !ok || !plugin.Meta.AccountPool {
+			continue
+		}
+		if pluginFilter != "" && plugin.Meta.Key != pluginFilter {
+			continue
+		}
+		accounts, err := service.ListProviderPoolAccounts(c.Request.Context(), channel, true)
+		if err != nil {
+			continue
+		}
+		items = append(items, accounts...)
+	}
+	common.ApiSuccess(c, gin.H{"items": items})
 }
 
 // Administrators may bind installed account-pool providers and manage their
@@ -47,6 +106,7 @@ func CreateProviderAccountPool(c *gin.Context) {
 	var request struct {
 		Plugin   string                       `json:"plugin"`
 		Name     string                       `json:"name"`
+		Groups   []string                     `json:"groups"`
 		Settings service.ProviderPoolSettings `json:"settings"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 32<<10)
@@ -66,7 +126,23 @@ func CreateProviderAccountPool(c *gin.Context) {
 		common.ApiErrorT(c, "Account pool plugin is unavailable")
 		return
 	}
-	groups := []string{"plus", "pro"}
+	var groups []string
+	if plugin.Meta.Key == "gpt-account-pool" || strings.Contains(strings.ToLower(plugin.Meta.BaseURL), "chatgpt.com") {
+		groups = []string{"plus", "pro"}
+	} else {
+		seen := map[string]bool{}
+		for _, raw := range request.Groups {
+			g := strings.TrimSpace(raw)
+			if g == "" || seen[g] {
+				continue
+			}
+			seen[g] = true
+			groups = append(groups, g)
+		}
+		if len(groups) == 0 {
+			groups = []string{"default"}
+		}
+	}
 	if err := ensureProviderPoolCustomerGroups(groups); err != nil {
 		common.ApiError(c, err)
 		return
@@ -324,8 +400,9 @@ func OperateProviderAccount(c *gin.Context) {
 		return
 	}
 	var request struct {
-		Action         string `json:"action"`
+		Action          string `json:"action"`
 		TargetChannelID int    `json:"target_channel_id"`
+		CustomExpiresAt *int64 `json:"custom_expires_at"`
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1024)
 	if common.DecodeJson(c.Request.Body, &request) != nil {
@@ -351,6 +428,48 @@ func OperateProviderAccount(c *gin.Context) {
 			"result":     mark.Result,
 			"reason":     mark.Reason,
 			"time":       mark.Time,
+		})
+		return
+	case "reset_quota":
+		res, resetErr := service.ResetProviderPoolAccountQuota(c.Request.Context(), account)
+		if resetErr != nil {
+			common.ApiErrorT(c, resetErr.Error())
+			return
+		}
+		recordManageAudit(c, "channel.update", map[string]any{
+			"id":         channel.Id,
+			"source":     "account_pool_reset_quota",
+			"account_id": account.AccountID,
+			"code":       res.Code,
+		})
+		common.ApiSuccess(c, gin.H{
+			"account_id": account.AccountID,
+			"code":       res.Code,
+			"message":    res.Message,
+		})
+		return
+	case "set_expiry":
+		if request.CustomExpiresAt == nil || *request.CustomExpiresAt < 0 {
+			common.ApiErrorT(c, "Invalid parameters")
+			return
+		}
+		targetExpiry := *request.CustomExpiresAt
+		err = service.UpdateProviderAccount(account.OwnerID, account.AccountID, func(state *model.ProviderAccountState) {
+			state.CustomExpiresAt = targetExpiry
+		})
+		if err != nil {
+			common.ApiErrorT(c, "Account operation failed")
+			return
+		}
+		recordManageAudit(c, "channel.update", map[string]any{
+			"id":                channel.Id,
+			"source":            "account_pool_set_expiry",
+			"account_id":        account.AccountID,
+			"custom_expires_at": targetExpiry,
+		})
+		common.ApiSuccess(c, gin.H{
+			"account_id":        account.AccountID,
+			"custom_expires_at": targetExpiry,
 		})
 		return
 	case "transfer":

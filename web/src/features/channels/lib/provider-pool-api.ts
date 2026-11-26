@@ -5,16 +5,49 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 export type PoolSettings = {
   concurrency: number
 }
+
+export type PoolPlugin = {
+  key: string
+  name: LocalizedTextValue
+  supports_reset_quota?: boolean
+}
+
 export type PoolChannel = {
   id: number
   name: string
   groups: string[]
   models: string[]
-  plugin: { key: string; name: string }
+  plugin: PoolPlugin
+  supports_reset_quota?: boolean
+  account_count?: number
+  active_count?: number
+  problem_count?: number
+  disabled_count?: number
 }
+
+export type ResetCreditItem = {
+  id?: string
+  title?: string
+  status?: string
+  reset_type?: string
+  granted_at?: number
+  expires_at?: number
+  supported_by_plan?: boolean
+}
+
+export type AccountResetCredits = {
+  available_count: number
+  applicable_available_count: number
+  credits?: ResetCreditItem[]
+  error?: string
+}
+
 export type PoolAccount = {
   owner_id: number
   index: number
+  plugin_key?: string
+  plugin_name?: LocalizedTextValue
+  supports_reset_quota?: boolean
   account_id: string
   label: string
   expires_at: number
@@ -26,11 +59,18 @@ export type PoolAccount = {
     checked_at?: number
     wrong_answers?: number
     degraded?: boolean
+    custom_expires_at?: number
   }
   profile: {
     plan: string
     category: string
     plan_verified: boolean
+    subscription_expires_at?: number
+    subscription_start_at?: number
+    subscription_plan?: string
+    will_renew?: boolean
+    supports_reset_credits?: boolean
+    reset_credits?: AccountResetCredits | null
     quota_checked_at: number
     quota_error: string
     windows:
@@ -43,19 +83,33 @@ export type PoolAccount = {
         }[]
       | null
   }
-  channels: { id: number; name: string; groups: string[] }[]
+  channels: { id: number; name: string; groups: string[]; concurrency?: number }[]
 }
+
 export type PoolData = { items: PoolAccount[]; settings: PoolSettings }
+
 export const poolQueryKeys = {
   channels: ['provider-account-pools'] as const,
   accounts: (id: number) => ['provider-account-pool', id] as const,
+  allAccounts: (plugin?: string) =>
+    ['provider-account-pool', 'all', plugin || 'all'] as const,
 }
 
 export async function listPoolChannels(): Promise<{
   channels: PoolChannel[]
-  plugins: { key: string; name: string }[]
+  plugins: PoolPlugin[]
 }> {
   const response = await api.get('/api/channel/account_pools')
+  return requireServerSuccess(response.data).data
+}
+
+export async function getAllProviderPoolAccounts(
+  plugin?: string
+): Promise<{ items: PoolAccount[] }> {
+  const response = await api.get('/api/channel/account_pools/accounts', {
+    params: plugin ? { plugin } : undefined,
+    disableDuplicate: true,
+  })
   return requireServerSuccess(response.data).data
 }
 
@@ -97,6 +151,12 @@ export type InspectAccountResult = {
   time: number
 }
 
+export type ResetQuotaResult = {
+  account_id: string
+  code: string
+  message?: string
+}
+
 export async function operatePoolAccount(
   id: number,
   accountId: string,
@@ -122,9 +182,34 @@ export async function inspectPoolAccount(
   return requireServerSuccess(response.data).data as InspectAccountResult
 }
 
+export async function resetPoolAccountQuota(
+  id: number,
+  accountId: string
+): Promise<ResetQuotaResult> {
+  const response = await api.post(
+    `/api/channel/${id}/account_pool/accounts/${encodeURIComponent(accountId)}`,
+    { action: 'reset_quota' },
+    { timeout: 60000 }
+  )
+  return requireServerSuccess(response.data).data as ResetQuotaResult
+}
+
+export async function setPoolAccountExpiry(
+  id: number,
+  accountId: string,
+  customExpiresAt: number
+): Promise<{ account_id: string; custom_expires_at: number }> {
+  const response = await api.post(
+    `/api/channel/${id}/account_pool/accounts/${encodeURIComponent(accountId)}`,
+    { action: 'set_expiry', custom_expires_at: customExpiresAt }
+  )
+  return requireServerSuccess(response.data).data
+}
+
 export async function createPoolChannel(input: {
   plugin: string
   name: string
+  groups?: string[]
   settings: PoolSettings
 }): Promise<{ id: number }> {
   const response = await api.post('/api/channel/account_pools', input)

@@ -212,8 +212,11 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/channel-inspections", middleware.UserAuth(), middleware.DisableCache(), controller.CustomerChannelInspections)
 		inspectionAdmin := apiRouter.Group("/channel-inspections/manage", middleware.AdminAuth(), middleware.DisableCache())
 		inspectionAdmin.GET("", controller.ListChannelInspections)
+		inspectionAdmin.GET("/candidates", controller.ListInspectionCandidates)
 		inspectionAdmin.POST("/:id", middleware.SessionCookieOriginGuard(), controller.SaveChannelInspection)
 		inspectionAdmin.POST("/:id/run", middleware.SessionCookieOriginGuard(), controller.RunChannelInspection)
+		inspectionAdmin.POST("/:id/enroll", middleware.SessionCookieOriginGuard(), controller.EnrollChannelInspection)
+		inspectionAdmin.DELETE("/:id/enroll", middleware.SessionCookieOriginGuard(), controller.UnenrollChannelInspection)
 		optionRoute := apiRouter.Group("/option")
 		optionRoute.Use(middleware.RootAuth())
 		{

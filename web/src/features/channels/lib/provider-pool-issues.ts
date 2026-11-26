@@ -9,3 +9,12 @@ export function providerAccountHasIssue(account: PoolAccount): boolean {
     (!!account.state.health && account.state.health !== 'passed')
   )
 }
+
+export function providerAccountHasActiveProblem(account: PoolAccount): boolean {
+  return (
+    account.needs_login ||
+    !!account.state.degraded ||
+    !!account.profile.quota_error ||
+    (!!account.state.health && account.state.health !== 'passed')
+  )
+}

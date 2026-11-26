@@ -11,13 +11,14 @@ import (
 // ProviderAccountState follows the stable account ID across token refreshes and
 // key reordering. Manual disable survives inspections and credential refreshes.
 type ProviderAccountState struct {
-	Disabled     bool                    `json:"disabled"`
-	Health       string                  `json:"health,omitempty"`
-	LastError    string                  `json:"last_error,omitempty"`
-	CheckedAt    int64                   `json:"checked_at,omitempty"`
-	WrongAnswers int                     `json:"wrong_answers,omitempty"`
-	Degraded     bool                    `json:"degraded,omitempty"`
-	Profile      jsplugin.AccountProfile `json:"profile"`
+	Disabled        bool                    `json:"disabled"`
+	Health          string                  `json:"health,omitempty"`
+	LastError       string                  `json:"last_error,omitempty"`
+	CheckedAt       int64                   `json:"checked_at,omitempty"`
+	WrongAnswers    int                     `json:"wrong_answers,omitempty"`
+	Degraded        bool                    `json:"degraded,omitempty"`
+	CustomExpiresAt int64                   `json:"custom_expires_at,omitempty"`
+	Profile         jsplugin.AccountProfile `json:"profile"`
 }
 
 // UpdateProviderPoolSettings changes the per-account concurrency cap without

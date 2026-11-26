@@ -22,6 +22,7 @@ type ProviderPoolSettings struct {
 }
 
 var providerPoolCursors sync.Map
+var resettingProviderAccount sync.Map
 
 func GetProviderPoolSettings(channelID int) ProviderPoolSettings {
 	channel, err := model.GetChannelById(channelID, false)
@@ -43,17 +44,20 @@ func IsProviderPool(channel *model.Channel) bool {
 // ProviderPoolAccount retains ownership server-side. Public never serializes a
 // credential or its headers. Account IDs remain stable when tokens rotate.
 type ProviderPoolAccount struct {
-	Owner      *model.Channel             `json:"-"`
-	Line       string                     `json:"-"`
-	Index      int                        `json:"index"`
-	OwnerID    int                        `json:"owner_id"`
-	AccountID  string                     `json:"account_id"`
-	Label      string                     `json:"label"`
-	ExpiresAt  int64                      `json:"expires_at"`
-	NeedsLogin bool                       `json:"needs_login"`
-	State      model.ProviderAccountState `json:"state"`
-	Profile    jsplugin.AccountProfile    `json:"profile"`
-	Channels   []ProviderPoolChannel      `json:"channels"`
+	Owner              *model.Channel             `json:"-"`
+	Line               string                     `json:"-"`
+	Index              int                        `json:"index"`
+	OwnerID            int                        `json:"owner_id"`
+	PluginKey          string                     `json:"plugin_key"`
+	PluginName         string                     `json:"plugin_name,omitempty"`
+	SupportsResetQuota bool                       `json:"supports_reset_quota,omitempty"`
+	AccountID          string                     `json:"account_id"`
+	Label              string                     `json:"label"`
+	ExpiresAt          int64                      `json:"expires_at"`
+	NeedsLogin         bool                       `json:"needs_login"`
+	State              model.ProviderAccountState `json:"state"`
+	Profile            jsplugin.AccountProfile    `json:"profile"`
+	Channels           []ProviderPoolChannel      `json:"channels"`
 }
 
 type ProviderPoolChannel struct {
@@ -72,6 +76,7 @@ func ListProviderPoolAccounts(ctx context.Context, channel *model.Channel, inclu
 		return nil, errors.New("channel plugin changed while loading its accounts")
 	}
 	var accounts []ProviderPoolAccount
+	supportsReset := plugin.HasProviderHook("resetQuota")
 	assignedChannel := ProviderPoolChannel{ID: channel.Id, Name: channel.Name, Groups: channel.GetGroups(),
 		Concurrency: max(1, channel.ChannelInfo.ProviderPoolConcurrency)}
 	for index, line := range pluginCredentialKeyLines(channel) {
@@ -90,6 +95,7 @@ func ListProviderPoolAccounts(ctx context.Context, channel *model.Channel, inclu
 		}
 		needsLogin := credential.NeedsLogin || profile.QuotaError == "login_required" || state.Health == "login_required" || state.Health == "account_banned"
 		accounts = append(accounts, ProviderPoolAccount{Owner: channel, Line: line, Index: index, OwnerID: channel.Id,
+			PluginKey: plugin.Meta.Key, PluginName: plugin.Meta.Name, SupportsResetQuota: supportsReset,
 			AccountID: credential.AccountID, Label: credential.Label, ExpiresAt: credential.ExpiresAt,
 			NeedsLogin: needsLogin, State: state, Profile: profile, Channels: []ProviderPoolChannel{assignedChannel}})
 	}
@@ -97,6 +103,14 @@ func ListProviderPoolAccounts(ctx context.Context, channel *model.Channel, inclu
 }
 
 func ProviderAccountMatches(account ProviderPoolAccount, customerGroup, legacyCategory string) bool {
+	if account.State.Degraded {
+		return false
+	}
+	pluginKey := account.PluginKey
+	if pluginKey == "" && account.Owner != nil {
+		pluginKey = account.Owner.GetSetting().TaskPluginKey
+	}
+	accountCategory := strings.ToLower(strings.TrimSpace(account.Profile.Category))
 	customerGroup = strings.ToLower(strings.TrimSpace(customerGroup))
 	if customerGroup != "plus" && customerGroup != "pro" {
 		legacyCategory = strings.ToLower(strings.TrimSpace(legacyCategory))
@@ -104,11 +118,19 @@ func ProviderAccountMatches(account ProviderPoolAccount, customerGroup, legacyCa
 			customerGroup = legacyCategory
 		}
 	}
-	if customerGroup == "plus" || customerGroup == "pro" {
-		return !account.State.Degraded && account.Profile.PlanVerified && account.Profile.Category == customerGroup
+	// Preserve strict Plus/Pro subscription isolation for GPT pools and explicit plus/pro groups.
+	if pluginKey == "gpt-account-pool" || customerGroup == "plus" || customerGroup == "pro" {
+		if customerGroup == "plus" || customerGroup == "pro" {
+			return account.Profile.PlanVerified && accountCategory == customerGroup
+		}
+		return account.Profile.PlanVerified && (accountCategory == "plus" || accountCategory == "pro")
 	}
-	return !account.State.Degraded && account.Profile.PlanVerified &&
-		(account.Profile.Category == "plus" || account.Profile.Category == "pro")
+	// Other account-pool plugins (e.g. Claude, Gemini, custom OAuth pools) can
+	// either match an explicit category or operate without tier isolation.
+	if accountCategory == "" || accountCategory == "default" || accountCategory == "standard" || accountCategory == "unknown" || customerGroup == "" {
+		return true
+	}
+	return accountCategory == customerGroup
 }
 
 func ProviderAccountUsable(account ProviderPoolAccount) bool {
@@ -298,6 +320,53 @@ func RefreshProviderPoolAccount(ctx context.Context, account ProviderPoolAccount
 	}
 	_, _, _, err := runScheduledPlugin(ctx, account.Owner, plugin, account.Index, account.Line, "manual")
 	return err
+}
+
+// ResetProviderPoolAccountQuota redeems a provider-side quota reset card (when
+// supported by the plugin), clears rate-limited health status, and refreshes
+// account quota windows in-place.
+func ResetProviderPoolAccountQuota(ctx context.Context, account ProviderPoolAccount) (jsplugin.ResetQuotaResult, error) {
+	plugin, ok := PluginOfChannel(account.Owner)
+	if !ok || !plugin.HasProviderHook("resetQuota") {
+		return jsplugin.ResetQuotaResult{}, errors.New("Quota reset card is not supported by this provider")
+	}
+	lockKey := fmt.Sprintf("%d:%s", account.OwnerID, account.AccountID)
+	if _, busy := resettingProviderAccount.LoadOrStore(lockKey, true); busy {
+		return jsplugin.ResetQuotaResult{}, errors.New("Quota reset is already in progress for this account")
+	}
+	defer resettingProviderAccount.Delete(lockKey)
+
+	prepared, err := FreshPluginCredentialLine(ctx, plugin, account.OwnerID, account.Index, account.Line)
+	if err != nil {
+		return jsplugin.ResetQuotaResult{}, err
+	}
+	credential, ok := jsplugin.ParseCredential(prepared)
+	if !ok {
+		return jsplugin.ResetQuotaResult{}, errors.New("Invalid account credential")
+	}
+	baseURL := account.Owner.GetBaseURL()
+	proxy := account.Owner.GetSetting().Proxy
+	hookCtx := jsplugin.CredentialContext{
+		BaseURL:    baseURL,
+		Credential: credential.Data,
+		Config:     plugin.ChannelConfigFor(account.Owner.GetOtherSettings().PluginConfig),
+	}
+	res, err := plugin.CallResetQuota(PluginCredentialHookContext(ctx, plugin, baseURL, proxy), hookCtx)
+	if err != nil {
+		return jsplugin.ResetQuotaResult{}, err
+	}
+	_ = UpdateProviderAccount(account.OwnerID, account.AccountID, func(state *model.ProviderAccountState) {
+		if state.Health == "rate_limited" {
+			state.Health = ""
+			state.LastError = ""
+		}
+	})
+	if updatedChannel, chErr := model.GetChannelById(account.OwnerID, true); chErr == nil {
+		if latest, findErr := FindProviderPoolAccount(ctx, updatedChannel, account.AccountID); findErr == nil {
+			_ = RefreshProviderPoolAccount(ctx, latest)
+		}
+	}
+	return res, nil
 }
 
 func FindProviderPoolAccount(ctx context.Context, channel *model.Channel, accountID string) (ProviderPoolAccount, error) {

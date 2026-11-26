@@ -362,14 +362,45 @@ func (p *LoadedPlugin) CallImportCredential(ctx context.Context, hookCtx Credent
 	return decodeCredentialResult(object, "importCredential result")
 }
 
+// ResetCreditItem describes one banked rate-limit reset credit returned by a provider.
+type ResetCreditItem struct {
+	ID              string `json:"id,omitempty"`
+	Title           string `json:"title,omitempty"`
+	Status          string `json:"status,omitempty"`
+	ResetType       string `json:"reset_type,omitempty"`
+	GrantedAt       int64  `json:"granted_at,omitempty"`
+	ExpiresAt       int64  `json:"expires_at,omitempty"`
+	SupportedByPlan bool   `json:"supported_by_plan,omitempty"`
+}
+
+// AccountResetCredits summarizes provider-side quota reset cards for an account.
+type AccountResetCredits struct {
+	AvailableCount           int               `json:"available_count"`
+	ApplicableAvailableCount int               `json:"applicable_available_count"`
+	Credits                  []ResetCreditItem `json:"credits,omitempty"`
+	Error                    string            `json:"error,omitempty"`
+}
+
+// ResetQuotaResult is returned by an account-pool plugin's resetQuota hook.
+type ResetQuotaResult struct {
+	Code    string `json:"code"`
+	Message string `json:"message,omitempty"`
+}
+
 // AccountProfile contains only explicitly public provider account properties.
 type AccountProfile struct {
-	Plan           string          `json:"plan"`
-	Category       string          `json:"category"`
-	PlanVerified   bool            `json:"plan_verified"`
-	Windows        []BalanceWindow `json:"windows"`
-	QuotaCheckedAt int64           `json:"quota_checked_at"`
-	QuotaError     string          `json:"quota_error"`
+	Plan                  string               `json:"plan"`
+	Category              string               `json:"category"`
+	PlanVerified          bool                 `json:"plan_verified"`
+	SubscriptionExpiresAt int64                `json:"subscription_expires_at,omitempty"`
+	SubscriptionStartAt   int64                `json:"subscription_start_at,omitempty"`
+	SubscriptionPlan      string               `json:"subscription_plan,omitempty"`
+	WillRenew             *bool                `json:"will_renew,omitempty"`
+	SupportsResetCredits  bool                 `json:"supports_reset_credits,omitempty"`
+	ResetCredits          *AccountResetCredits `json:"reset_credits,omitempty"`
+	Windows               []BalanceWindow      `json:"windows"`
+	QuotaCheckedAt        int64                `json:"quota_checked_at"`
+	QuotaError            string               `json:"quota_error"`
 }
 
 func (p *LoadedPlugin) CallDescribeAccount(ctx context.Context, hookCtx CredentialContext) (AccountProfile, error) {
@@ -378,15 +409,25 @@ func (p *LoadedPlugin) CallDescribeAccount(ctx context.Context, hookCtx Credenti
 		return AccountProfile{}, err
 	}
 	raw, err := common.Marshal(value)
-	if err != nil || len(raw) > 16<<10 {
+	if err != nil || len(raw) > 32<<10 {
 		return AccountProfile{}, errors.New("invalid account profile")
 	}
 	var profile AccountProfile
 	if err := common.Unmarshal(raw, &profile); err != nil {
 		return profile, err
 	}
-	if len(profile.Plan) > 128 || len(profile.Category) > 64 || len(profile.QuotaError) > 128 || len(profile.Windows) > maxBalanceWindows {
+	if len(profile.Plan) > 128 || len(profile.Category) > 64 || len(profile.SubscriptionPlan) > 128 || len(profile.QuotaError) > 128 || len(profile.Windows) > maxBalanceWindows || profile.SubscriptionExpiresAt < 0 || profile.SubscriptionStartAt < 0 {
 		return AccountProfile{}, errors.New("invalid account profile")
+	}
+	if profile.ResetCredits != nil {
+		if profile.ResetCredits.AvailableCount < 0 || profile.ResetCredits.ApplicableAvailableCount < 0 || len(profile.ResetCredits.Credits) > 32 || len(profile.ResetCredits.Error) > 256 {
+			return AccountProfile{}, errors.New("invalid account reset credits")
+		}
+		for _, item := range profile.ResetCredits.Credits {
+			if len(item.ID) > 128 || len(item.Title) > 160 || len(item.Status) > 64 || len(item.ResetType) > 64 || item.GrantedAt < 0 || item.ExpiresAt < 0 {
+				return AccountProfile{}, errors.New("invalid account reset credit item")
+			}
+		}
 	}
 	for _, window := range profile.Windows {
 		if math.IsNaN(window.Used) || math.IsInf(window.Used, 0) || window.Used < 0 || math.IsNaN(window.Limit) || math.IsInf(window.Limit, 0) || window.Limit <= 0 || window.ResetAt < 0 {
@@ -394,6 +435,40 @@ func (p *LoadedPlugin) CallDescribeAccount(ctx context.Context, hookCtx Credenti
 		}
 	}
 	return profile, nil
+}
+
+// CallResetQuota runs an account-pool plugin's optional resetQuota(ctx) hook,
+// e.g. consuming a provider rate-limit reset card.
+func (p *LoadedPlugin) CallResetQuota(ctx context.Context, hookCtx CredentialContext) (ResetQuotaResult, error) {
+	value, err := p.Engine.Call(ctx, "resetQuota", hookCtx.value())
+	if err != nil {
+		return ResetQuotaResult{}, err
+	}
+	object, err := resultObject(value, "resetQuota result")
+	if err != nil {
+		return ResetQuotaResult{}, fmt.Errorf("plugin %s %w", p.Meta.Key, err)
+	}
+	if err = allowMembers(object, "resetQuota result", "code", "message"); err != nil {
+		return ResetQuotaResult{}, fmt.Errorf("plugin %s %w", p.Meta.Key, err)
+	}
+	result := ResetQuotaResult{Code: "reset"}
+	if raw, exists := object["code"]; exists {
+		code, ok := raw.(string)
+		if !ok || len(code) > 64 {
+			return ResetQuotaResult{}, fmt.Errorf("plugin %s resetQuota code is invalid", p.Meta.Key)
+		}
+		if trimmed := strings.TrimSpace(code); trimmed != "" {
+			result.Code = trimmed
+		}
+	}
+	if raw, exists := object["message"]; exists {
+		msg, ok := raw.(string)
+		if !ok || len(msg) > 512 {
+			return ResetQuotaResult{}, fmt.Errorf("plugin %s resetQuota message is invalid", p.Meta.Key)
+		}
+		result.Message = strings.TrimSpace(msg)
+	}
+	return result, nil
 }
 
 // ScheduledContext is the current key and the trigger of scheduled.

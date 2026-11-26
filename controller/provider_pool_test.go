@@ -184,3 +184,64 @@ func TestProviderPoolCreationIgnoresLegacyAccountTypeAndModelInputs(t *testing.T
 	require.Equal(t, []string{"plus", "pro"}, channel.GetGroups())
 	require.Empty(t, channel.GetModels())
 }
+
+func TestProviderPoolSetExpiryAndAllAccountsOverview(t *testing.T) {
+	const pluginKey = "controller-pool-overview"
+	setupProviderPluginControllerTest(t, pluginKey)
+	require.NoError(t, jsplugin.DefaultRegistry.Unregister(pluginKey))
+	registerProviderPoolImportPlugin(t, pluginKey)
+
+	line, err := (jsplugin.Credential{
+		Plugin:    pluginKey,
+		AccountID: "acct-expiry-1",
+		Label:     "expiry@example.test",
+		Data:      []byte(`{"access_token":"secret-token"}`),
+	}).Line()
+	require.NoError(t, err)
+	ch := insertPluginChannel(t, pluginKey, "https://chatgpt.com", line, true)
+	ch.Name, ch.Group = "Overview Pool", "pro"
+	ch.ChannelInfo.ProviderAccounts = map[string]model.ProviderAccountState{
+		"acct-expiry-1": {
+			Profile: jsplugin.AccountProfile{
+				Plan: "pro", Category: "pro", PlanVerified: true,
+				SubscriptionExpiresAt: 1893456000,
+			},
+		},
+	}
+	require.NoError(t, model.DB.Model(ch).Updates(map[string]any{
+		"name": ch.Name, "group": ch.Group, "channel_info": ch.ChannelInfo,
+	}).Error)
+	model.InitChannelCache()
+
+	// Set custom expiry
+	setBody := `{"action":"set_expiry","custom_expires_at":1900000000}`
+	resp, raw := callChannelAPI(t, OperateProviderAccount, http.MethodPost,
+		"/api/channel/1/account_pool/accounts/acct-expiry-1", setBody,
+		idParam(ch.Id), gin.Param{Key: "account_id", Value: "acct-expiry-1"})
+	require.True(t, resp.Success, raw)
+	require.Contains(t, raw, `"custom_expires_at":1900000000`)
+
+	// All-accounts CPA overview endpoint returns account with plugin_key and custom_expires_at
+	resp, raw = callChannelAPI(t, GetAllProviderAccountPools, http.MethodGet, "/api/channel/account_pools/accounts", "")
+	require.True(t, resp.Success, raw)
+	require.Contains(t, raw, "expiry@example.test")
+	require.Contains(t, raw, `"plugin_key":"controller-pool-overview"`)
+	require.Contains(t, raw, `"custom_expires_at":1900000000`)
+	require.NotContains(t, raw, "secret-token")
+
+	// ListProviderAccountPools returns summary counts
+	resp, raw = callChannelAPI(t, ListProviderAccountPools, http.MethodGet, "/api/channel/account_pools", "")
+	require.True(t, resp.Success, raw)
+	require.Contains(t, raw, `"account_count":1`)
+	require.Contains(t, raw, `"active_count":1`)
+
+	// Clear custom expiry back to 0
+	clearBody := `{"action":"set_expiry","custom_expires_at":0}`
+	resp, raw = callChannelAPI(t, OperateProviderAccount, http.MethodPost,
+		"/api/channel/1/account_pool/accounts/acct-expiry-1", clearBody,
+		idParam(ch.Id), gin.Param{Key: "account_id", Value: "acct-expiry-1"})
+	require.True(t, resp.Success, raw)
+	stored, err := model.GetChannelById(ch.Id, true)
+	require.NoError(t, err)
+	require.Equal(t, int64(0), stored.ChannelInfo.ProviderAccounts["acct-expiry-1"].CustomExpiresAt)
+}

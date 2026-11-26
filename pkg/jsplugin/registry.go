@@ -793,13 +793,13 @@ var taskOnlyMetaFields = []string{"routes", "protocols", "fetchMode", "submitRes
 
 // ProviderHooks are the optional credential, relay and channel exports of a
 // plugin.
-var ProviderHooks = []string{"login", "refresh", "revoke", "signRequest", "prepareRequest", "credentialRejected", "convertRequest", "convertResponse", "convertStreamEvent", "exchangeKey", "checkKey", "buildBalanceRequest", "parseBalance", "scheduled", "importCredential", "describeAccount"}
+var ProviderHooks = []string{"login", "refresh", "revoke", "signRequest", "prepareRequest", "credentialRejected", "convertRequest", "convertResponse", "convertStreamEvent", "exchangeKey", "checkKey", "buildBalanceRequest", "parseBalance", "scheduled", "importCredential", "describeAccount", "resetQuota"}
 
 var providerConvertHooks = []string{"convertRequest", "convertResponse", "convertStreamEvent"}
 
 // relayOnlyHooks act on relay requests, so only a plugin with meta.relay may
 // export them. The credential hooks serve the task part as well.
-var relayOnlyHooks = []string{"prepareRequest", "credentialRejected", "convertRequest", "convertResponse", "convertStreamEvent", "importCredential", "describeAccount"}
+var relayOnlyHooks = []string{"prepareRequest", "credentialRejected", "convertRequest", "convertResponse", "convertStreamEvent", "importCredential", "describeAccount", "resetQuota"}
 
 func validateProviderHooks(meta Meta, engine *Engine) error {
 	if meta.AccountPool && (!meta.HasProviderPart() || !engine.HasExport("describeAccount") || !engine.HasExport("login")) {
