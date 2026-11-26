@@ -209,6 +209,7 @@ func ClearChannelAffinityCacheAll() int {
 			common.SysError(common.LogText("channel affinity cache delete many failed: err=%v", err))
 		}
 	}
+	clearProviderPoolAffinityCacheAll()
 	return len(keys)
 }
 
@@ -244,6 +245,7 @@ func ClearChannelAffinityCacheByRuleName(ruleName string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	clearProviderPoolAffinityCacheByPrefix(ruleName)
 	return deleted, nil
 }
 
@@ -659,6 +661,7 @@ func ClearCurrentChannelAffinityCache(c *gin.Context) bool {
 
 	cache := getChannelAffinityCache()
 	deleted, err := cache.DeleteMany([]string{cacheKey})
+	clearCurrentProviderPoolAccountAffinity(c)
 	if err != nil {
 		common.SysError(common.LogText("channel affinity cache delete current failed: err=%v", err))
 		return false
@@ -756,6 +759,7 @@ func RecordChannelAffinity(c *gin.Context, channelID int) {
 	if err := cache.SetWithTTL(cacheKey, channelID, time.Duration(ttlSeconds)*time.Second); err != nil {
 		common.SysError(common.LogText("channel affinity cache set failed: key=%s, err=%v", cacheKey, err))
 	}
+	recordProviderPoolAccountAffinity(c, channelID)
 }
 
 type ChannelAffinityUsageCacheStats struct {

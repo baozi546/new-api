@@ -36,6 +36,54 @@ redis.call('ZADD', KEYS[1], t[1] * 1000 + math.floor(t[2] / 1000) + tonumber(ARG
 redis.call('PEXPIRE', KEYS[1], ARGV[2])
 return 1`
 
+const providerSlotCountScript = `
+local t = redis.call('TIME')
+local now = t[1] * 1000 + math.floor(t[2] / 1000)
+local counts = {}
+for i = 1, #KEYS do
+  counts[i] = redis.call('ZCOUNT', KEYS[i], '(' .. now, '+inf')
+end
+return counts`
+
+// ProviderAccountActiveSlots returns the number of currently active in-flight
+// leases for each account key. Errors from Redis fall back to empty counts so
+// account selection degrades gracefully instead of failing requests.
+func ProviderAccountActiveSlots(ctx context.Context, accountKeys []string) map[string]int {
+	counts := make(map[string]int, len(accountKeys))
+	if len(accountKeys) == 0 {
+		return counts
+	}
+	if common.RedisEnabled && common.RDB != nil {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		redisKeys := make([]string, len(accountKeys))
+		for i, k := range accountKeys {
+			redisKeys[i] = "provider-account-slot:" + k
+		}
+		queryCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		vals, err := common.RDB.Eval(queryCtx, providerSlotCountScript, redisKeys).Int64Slice()
+		if err != nil {
+			return counts
+		}
+		for i, k := range accountKeys {
+			if i < len(vals) && vals[i] > 0 {
+				counts[k] = int(vals[i])
+			}
+		}
+		return counts
+	}
+	providerCapacityMu.Lock()
+	defer providerCapacityMu.Unlock()
+	for _, k := range accountKeys {
+		if state := providerCapacities[k]; state != nil && state.used > 0 {
+			counts[k] = state.used
+		}
+	}
+	return counts
+}
+
 // AcquireProviderAccountSlot holds capacity until release, including response
 // streaming. The returned context cancels upstream work if its lease is lost.
 func AcquireProviderAccountSlot(ctx context.Context, accountKey string, limit int) (context.Context, func(), error) {

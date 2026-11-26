@@ -116,7 +116,10 @@ func ProviderAccountUsable(account ProviderPoolAccount) bool {
 }
 
 // SelectProviderPoolAccount uses an exact account on inspections. Ordinary
-// requests poll only accounts of the channel's configured subscription type.
+// requests first honor session affinity (reusing the channel affinity session
+// key within TTL so a conversation stays on the same healthy account). When no
+// bound account is available, it prefers the least-loaded (idle) eligible
+// accounts and breaks ties with round-robin polling.
 func SelectProviderPoolAccount(c *gin.Context, channel *model.Channel) (string, int, error) {
 	accounts, err := ListProviderPoolAccounts(c.Request.Context(), channel)
 	if err != nil {
@@ -134,9 +137,49 @@ func SelectProviderPoolAccount(c *gin.Context, channel *model.Channel) (string, 
 	if len(eligible) == 0 {
 		return "", 0, errors.New("no available account matching the customer group")
 	}
-	cursor, _ := providerPoolCursors.LoadOrStore(channel.Id, &atomic.Uint64{})
-	index := (cursor.(*atomic.Uint64).Add(1) - 1) % uint64(len(eligible))
-	account := eligible[index]
+	var account ProviderPoolAccount
+	selected := false
+	if fixed == "" {
+		if preferredID, ok := getPreferredProviderPoolAccount(c, channel.Id); ok {
+			for _, candidate := range eligible {
+				if candidate.AccountID == preferredID {
+					account = candidate
+					selected = true
+					break
+				}
+			}
+		}
+	}
+	if !selected {
+		candidates := eligible
+		if len(eligible) > 1 {
+			pluginKey := channel.GetSetting().TaskPluginKey
+			accountKeys := make([]string, len(eligible))
+			for i, candidate := range eligible {
+				accountKeys[i] = ProviderPoolAccountKey(pluginKey, candidate.AccountID)
+			}
+			activeSlots := ProviderAccountActiveSlots(c.Request.Context(), accountKeys)
+			minActive := activeSlots[accountKeys[0]]
+			for i := 1; i < len(eligible); i++ {
+				if active := activeSlots[accountKeys[i]]; active < minActive {
+					minActive = active
+				}
+			}
+			leastLoaded := make([]ProviderPoolAccount, 0, len(eligible))
+			for i, candidate := range eligible {
+				if activeSlots[accountKeys[i]] == minActive {
+					leastLoaded = append(leastLoaded, candidate)
+				}
+			}
+			candidates = leastLoaded
+		}
+		cursor, _ := providerPoolCursors.LoadOrStore(channel.Id, &atomic.Uint64{})
+		index := (cursor.(*atomic.Uint64).Add(1) - 1) % uint64(len(candidates))
+		account = candidates[index]
+		if fixed == "" {
+			setProviderPoolAccountAffinity(c, channel.Id, account.AccountID)
+		}
+	}
 	c.Set("provider_pool_account", account)
 	c.Set("provider_pool_owner_id", account.OwnerID)
 	c.Set("provider_pool_account_id", account.AccountID)
