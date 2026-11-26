@@ -81,6 +81,8 @@
     "Add question": "新增題目",
     "Run inspection now": "立即巡檢",
     "Inspection started": "巡檢已開始",
+    "Inspect account": "單獨巡檢",
+    "Account inspection already running": "該帳號正在巡檢中",
     "Inspection already running": "此渠道正在巡檢",
     "Customer view": "客戶檢視",
     "No channels with a dedicated CPA pool": "尚無綁定 CPA 帳號池的渠道",

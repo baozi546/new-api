@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Dialog } from '@/components/dialog'
@@ -22,6 +23,7 @@ import { getServerErrorMessage } from '@/lib/server-error-message'
 
 import {
   getProviderPool,
+  inspectPoolAccount,
   operatePoolAccount,
   poolQueryKeys,
   type PoolAccount,
@@ -50,6 +52,7 @@ export function ProviderPoolPanel(props: {
   const [removing, setRemoving] = useState<PoolAccount | null>(null)
   const [transferring, setTransferring] = useState<PoolAccount | null>(null)
   const [transferTargetId, setTransferTargetId] = useState<number | null>(null)
+  const [inspectingId, setInspectingId] = useState<string | null>(null)
   const id = props.channelId || 0
   const query = useQuery({
     queryKey: poolQueryKeys.accounts(id),
@@ -61,8 +64,44 @@ export function ProviderPoolPanel(props: {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['provider-account-pool'] }),
       queryClient.invalidateQueries({ queryKey: poolQueryKeys.channels }),
+      queryClient.invalidateQueries({ queryKey: ['channel-inspections'] }),
     ])
   }
+  const inspectOutcomeLabels: Record<string, string> = {
+    passed: 'Passed',
+    wrong_answer: 'Answer mismatch',
+    rate_limited: 'Rate limited',
+    login_required: 'Login required',
+    account_banned: 'Account banned',
+    disabled: 'Disabled',
+    inconclusive: 'Inconclusive',
+  }
+  const inspectMutation = useMutation({
+    mutationFn: async (account: PoolAccount) => {
+      setInspectingId(account.account_id)
+      return inspectPoolAccount(id, account.account_id)
+    },
+    onSuccess: (res, account) => {
+      const label = account.label || account.account_id
+      const outcome = t(inspectOutcomeLabels[res.result] || 'Inconclusive')
+      if (res.result === 'passed') {
+        toast.success(`${label}: ${outcome}`)
+      } else {
+        toast.error(
+          res.reason
+            ? `${label}: ${outcome} (${res.reason})`
+            : `${label}: ${outcome}`
+        )
+      }
+    },
+    onError: (err) => {
+      toast.error(getServerErrorMessage(err))
+    },
+    onSettled: async () => {
+      setInspectingId(null)
+      await refresh()
+    },
+  })
   const action = useMutation({
     mutationFn: (value: {
       account: PoolAccount
@@ -183,6 +222,10 @@ export function ProviderPoolPanel(props: {
               key={account.account_id}
               account={account}
               disabled={busy}
+              inspecting={
+                inspectMutation.isPending && inspectingId === account.account_id
+              }
+              onInspect={(value) => inspectMutation.mutate(value)}
               onLogin={(value) =>
                 setLogin({ owner: value.owner_id, index: value.index })
               }

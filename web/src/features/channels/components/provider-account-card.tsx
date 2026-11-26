@@ -26,6 +26,8 @@ const healthLabels: Record<string, string> = {
 export function ProviderAccountCard(props: {
   account: PoolAccount
   disabled: boolean
+  inspecting?: boolean
+  onInspect?: (account: PoolAccount) => void
   onAction: (account: PoolAccount, action: string) => void
   onLogin: (account: PoolAccount) => void
   onTransfer?: (account: PoolAccount) => void
@@ -110,6 +112,18 @@ export function ProviderAccountCard(props: {
         </ItemDescription>
       </ItemContent>
       <ItemActions className='flex-wrap justify-start'>
+        {props.onInspect && (
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            disabled={props.disabled || !!props.inspecting}
+            isLoading={!!props.inspecting}
+            onClick={() => props.onInspect?.(account)}
+          >
+            {t('Inspect account')}
+          </Button>
+        )}
         <Button
           type='button'
           variant='outline'

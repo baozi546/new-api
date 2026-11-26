@@ -81,6 +81,8 @@
     "Add question": "Добавить вопрос",
     "Run inspection now": "Проверить сейчас",
     "Inspection started": "Проверка началась",
+    "Inspect account": "Проверить аккаунт",
+    "Account inspection already running": "Проверка аккаунта уже выполняется",
     "Inspection already running": "Проверка уже идёт",
     "Customer view": "Вид клиента",
     "No channels with a dedicated CPA pool": "Нет каналов с пулом CPA",

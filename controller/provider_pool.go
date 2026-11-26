@@ -333,6 +333,26 @@ func OperateProviderAccount(c *gin.Context) {
 		return
 	}
 	switch request.Action {
+	case "inspect":
+		mark, testedModel, inspectErr := inspectSingleProviderPoolAccount(c.Request.Context(), *channel, account)
+		if inspectErr != nil {
+			common.ApiErrorT(c, inspectErr.Error())
+			return
+		}
+		recordManageAudit(c, "channel.test", map[string]any{
+			"id":         channel.Id,
+			"source":     "account_pool_inspect",
+			"account_id": account.AccountID,
+			"result":     mark.Result,
+		})
+		common.ApiSuccess(c, gin.H{
+			"account_id": account.AccountID,
+			"model":      testedModel,
+			"result":     mark.Result,
+			"reason":     mark.Reason,
+			"time":       mark.Time,
+		})
+		return
 	case "transfer":
 		if role := c.GetInt("role"); role != common.RoleAdminUser && role != common.RoleRootUser {
 			common.ApiErrorT(c, "Unauthorized, insufficient privileges")

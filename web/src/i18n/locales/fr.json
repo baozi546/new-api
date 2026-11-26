@@ -81,6 +81,8 @@
     "Add question": "Ajouter une question",
     "Run inspection now": "Lancer le contrôle",
     "Inspection started": "Contrôle lancé",
+    "Inspect account": "Inspecter le compte",
+    "Account inspection already running": "Inspection du compte déjà en cours",
     "Inspection already running": "Contrôle déjà en cours",
     "Customer view": "Vue client",
     "No channels with a dedicated CPA pool": "Aucun canal lié à un groupe CPA",

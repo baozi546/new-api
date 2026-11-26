@@ -140,6 +140,7 @@ func listChannelInspections(c *gin.Context, admin bool) {
 		for _, a := range last.Accounts {
 			card := gin.H{"code": common.GenerateHMAC(fmt.Sprintf("quality/%d/%s", ch.Id, a.ID))[:10], "time": a.Time, "result": a.Result, "number": a.Number}
 			if admin {
+				card["account_id"] = a.ID
 				card["label"] = a.Label
 				if a.Reason != "" {
 					card["reason"] = a.Reason

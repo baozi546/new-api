@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { toast } from 'sonner'
 
 import { SectionPageLayout } from '@/components/layout'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -11,7 +12,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { api } from '@/lib/api'
 import { formatTimestampToDate } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
+import { getServerErrorMessage } from '@/lib/server-error-message'
 import { useAuthStore } from '@/stores/auth-store'
+
+import { inspectPoolAccount } from './lib/provider-pool-api'
 
 async function requestInspection<T>(
   method: 'GET' | 'POST',
@@ -59,6 +63,7 @@ type Card = {
   model?: string
   accounts: {
     code: string
+    account_id?: string
     label?: string
     reason?: string
     result: string
@@ -287,6 +292,7 @@ export function ChannelInspections() {
   const { t } = useTranslation()
   const admin = useAuthStore((s) => (s.auth.user?.role ?? 0) >= ROLE.ADMIN)
   const [preview, setPreview] = useState(false)
+  const [inspectingKey, setInspectingKey] = useState<string | null>(null)
   const manage = admin && !preview
   const query = useQuery({
     queryKey: ['channel-inspections', manage ? 'manage' : 'customer'],
@@ -298,6 +304,35 @@ export function ChannelInspections() {
     },
     refetchInterval: 10000,
     retry: false,
+  })
+  const inspectOne = useMutation({
+    mutationFn: async (input: {
+      channelId: number
+      accountId: string
+      label: string
+    }) => {
+      setInspectingKey(`${input.channelId}:${input.accountId}`)
+      return inspectPoolAccount(input.channelId, input.accountId)
+    },
+    onSuccess: (res, input) => {
+      const outcome = t(outcomes[res.result] || 'Inconclusive')
+      if (res.result === 'passed') {
+        toast.success(`${input.label}: ${outcome}`)
+      } else {
+        toast.error(
+          res.reason
+            ? `${input.label}: ${outcome} (${res.reason})`
+            : `${input.label}: ${outcome}`
+        )
+      }
+    },
+    onError: (err) => {
+      toast.error(getServerErrorMessage(err))
+    },
+    onSettled: async () => {
+      setInspectingKey(null)
+      await query.refetch()
+    },
   })
   return (
     <SectionPageLayout>
@@ -394,11 +429,37 @@ export function ChannelInspections() {
                               </p>
                             )}
                           </div>
-                          <span className='shrink-0'>
-                            {t(outcomes[a.result] || 'Inconclusive')}
-                            {a.time > 0 &&
-                              ` · ${formatTimestampToDate(a.time)}`}
-                          </span>
+                          <div className='flex shrink-0 items-center gap-2'>
+                            <span>
+                              {t(outcomes[a.result] || 'Inconclusive')}
+                              {a.time > 0 &&
+                                ` · ${formatTimestampToDate(a.time)}`}
+                            </span>
+                            {manage && r.id && a.account_id && (
+                              <Button
+                                type='button'
+                                variant='outline'
+                                size='sm'
+                                disabled={
+                                  inspectOne.isPending &&
+                                  inspectingKey === `${r.id}:${a.account_id}`
+                                }
+                                isLoading={
+                                  inspectOne.isPending &&
+                                  inspectingKey === `${r.id}:${a.account_id}`
+                                }
+                                onClick={() =>
+                                  inspectOne.mutate({
+                                    channelId: r.id!,
+                                    accountId: a.account_id!,
+                                    label: a.label || `#${a.code}`,
+                                  })
+                                }
+                              >
+                                {t('Inspect account')}
+                              </Button>
+                            )}
+                          </div>
                         </li>
                       ))}
                     </ul>

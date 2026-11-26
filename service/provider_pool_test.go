@@ -213,6 +213,21 @@ func TestProviderPoolDisabledAccountIsExcludedAndCanBeRemoved(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	_, _, err = SelectProviderPoolAccount(c, owner)
 	require.ErrorContains(t, err, "no available account")
+
+	// Manual single-account inspection can explicitly force-select a disabled account
+	// to check whether upstream risk controls have been lifted.
+	cForce, _ := gin.CreateTestContext(httptest.NewRecorder())
+	cForce.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	cForce.Set("group", "pro")
+	cForce.Set("provider_pool_fixed_account", "disabled-account")
+	cForce.Set("provider_pool_force_inspect", true)
+	forcedLine, _, err := SelectProviderPoolAccount(cForce, owner)
+	require.NoError(t, err)
+	require.Equal(t, line, forcedLine)
+	revalidated, err := RevalidateProviderPoolAccount(cForce, owner.Id)
+	require.NoError(t, err)
+	require.Equal(t, "disabled-account", revalidated.AccountID)
+
 	accounts, err := ListProviderPoolAccounts(context.Background(), owner)
 	require.NoError(t, err)
 	require.Len(t, accounts, 1)

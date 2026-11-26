@@ -89,6 +89,14 @@ export async function importPoolAccount(
   return requireServerSuccess(response.data).data
 }
 
+export type InspectAccountResult = {
+  account_id: string
+  model: string
+  result: string
+  reason?: string
+  time: number
+}
+
 export async function operatePoolAccount(
   id: number,
   accountId: string,
@@ -100,6 +108,18 @@ export async function operatePoolAccount(
     { action, target_channel_id: targetChannelId }
   )
   requireServerSuccess(response.data)
+}
+
+export async function inspectPoolAccount(
+  id: number,
+  accountId: string
+): Promise<InspectAccountResult> {
+  const response = await api.post(
+    `/api/channel/${id}/account_pool/accounts/${encodeURIComponent(accountId)}`,
+    { action: 'inspect' },
+    { timeout: 190000 }
+  )
+  return requireServerSuccess(response.data).data as InspectAccountResult
 }
 
 export async function createPoolChannel(input: {

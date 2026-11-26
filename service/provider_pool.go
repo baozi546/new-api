@@ -127,9 +127,13 @@ func SelectProviderPoolAccount(c *gin.Context, channel *model.Channel) (string, 
 	}
 	customerGroup := c.GetString("group")
 	fixed := c.GetString("provider_pool_fixed_account")
+	forceInspect := fixed != "" && c.GetBool("provider_pool_force_inspect")
 	eligible := make([]ProviderPoolAccount, 0, len(accounts))
 	for _, account := range accounts {
-		if !ProviderAccountMatches(account, customerGroup, channel.ChannelInfo.ProviderPoolCategory) || !ProviderAccountUsable(account) || fixed != "" && account.AccountID != fixed {
+		if fixed != "" && account.AccountID != fixed {
+			continue
+		}
+		if !forceInspect && (!ProviderAccountMatches(account, customerGroup, channel.ChannelInfo.ProviderPoolCategory) || !ProviderAccountUsable(account)) {
 			continue
 		}
 		eligible = append(eligible, account)
@@ -279,7 +283,8 @@ func RevalidateProviderPoolAccount(c *gin.Context, channelID int) (ProviderPoolA
 	if err != nil {
 		return ProviderPoolAccount{}, err
 	}
-	if !ProviderAccountUsable(account) || !ProviderAccountMatches(account, c.GetString("group"), channel.ChannelInfo.ProviderPoolCategory) {
+	forceInspect := c.GetString("provider_pool_fixed_account") != "" && c.GetBool("provider_pool_force_inspect")
+	if !forceInspect && (!ProviderAccountUsable(account) || !ProviderAccountMatches(account, c.GetString("group"), channel.ChannelInfo.ProviderPoolCategory)) {
 		return ProviderPoolAccount{}, errors.New("account is no longer available")
 	}
 	c.Set("provider_pool_owner_id", account.OwnerID)

@@ -81,6 +81,8 @@
     "Add question": "Thêm câu hỏi",
     "Run inspection now": "Kiểm tra ngay",
     "Inspection started": "Đã bắt đầu kiểm tra",
+    "Inspect account": "Kiểm tra tài khoản",
+    "Account inspection already running": "Tài khoản đang được kiểm tra",
     "Inspection already running": "Kênh đang được kiểm tra",
     "Customer view": "Giao diện khách hàng",
     "No channels with a dedicated CPA pool": "Chưa có kênh gắn với nhóm CPA",

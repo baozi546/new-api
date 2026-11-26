@@ -81,6 +81,8 @@
     "Add question": "問題を追加",
     "Run inspection now": "今すぐ点検",
     "Inspection started": "点検を開始しました",
+    "Inspect account": "個別点検",
+    "Account inspection already running": "このアカウントは点検中です",
     "Inspection already running": "点検は実行中です",
     "Customer view": "顧客ビュー",
     "No channels with a dedicated CPA pool": "CPA プールに紐づくチャネルはありません",

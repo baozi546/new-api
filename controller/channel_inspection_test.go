@@ -80,6 +80,7 @@ func TestChannelInspectionsUseProviderPoolAndPublishSafeResults(t *testing.T) {
 
 	admin, adminJSON := callChannelAPI(t, ListChannelInspections, "GET", "/", "")
 	require.True(t, admin.Success, adminJSON)
+	require.Contains(t, adminJSON, "private-account-id")
 	require.Contains(t, adminJSON, "private@example.test")
 	require.Contains(t, adminJSON, "private prompt")
 	require.Contains(t, adminJSON, "Invalid upstream response event")

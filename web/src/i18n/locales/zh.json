@@ -81,6 +81,8 @@
     "Add question": "添加题目",
     "Run inspection now": "立即巡检",
     "Inspection started": "巡检已开始",
+    "Inspect account": "单独巡检",
+    "Account inspection already running": "该账号正在巡检中",
     "Inspection already running": "该渠道正在巡检",
     "Customer view": "客户视图",
     "No channels with a dedicated CPA pool": "尚无绑定 CPA 号池的渠道",

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -15,6 +16,8 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 )
+
+var inspectingAccount sync.Map
 
 // Account inspections use the same chat converter and provider adaptor as the
 // playground, pinned to one stable account ID with no fallback to a peer.
@@ -52,75 +55,11 @@ func inspectProviderPoolChannel(channel model.Channel, cfg inspectionConfig) err
 			round.Accounts = append(round.Accounts, mark)
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		result := testChannel(ctx, &channel, testUserID, cfg.Model, string(constant.EndpointTypeOpenAI), false,
-			accountInspectionInput{AccountID: account.AccountID, Group: account.Profile.Category, Prompt: question.Prompt, Effort: cfg.ReasoningEffort})
-		cancel()
-		mark.Result = "inconclusive"
-		mark.Reason = inspectionCallFailureReason(result, &channel)
-		statusCode := result.statusCode
-		if statusCode == 0 && result.newAPIError != nil {
-			statusCode = result.newAPIError.StatusCode
-		}
-		if result.localErr == nil && result.newAPIError == nil {
-			var response struct {
-				Choices []struct {
-					Message struct {
-						Content string `json:"content"`
-					} `json:"message"`
-				} `json:"choices"`
-			}
-			if common.Unmarshal(result.response, &response) == nil && len(response.Choices) == 1 {
-				actual := response.Choices[0].Message.Content
-				if inspectionAnswerMatches(actual, question.Answer) {
-					mark.Result = "passed"
-				} else {
-					mark.Result = "wrong_answer"
-					mark.Reason = inspectionMismatchReason(question.Answer, actual)
-				}
-			} else {
-				mark.Reason = "Inspection response was not a valid chat completion"
-			}
-		} else if statusCode == http.StatusTooManyRequests {
-			mark.Result = "rate_limited"
-		} else if statusCode == http.StatusUnauthorized {
-			mark.Result = "login_required"
-		} else if statusCode == http.StatusForbidden && result.context != nil && result.context.GetBool("provider_pool_rejected") {
-			mark.Result = "account_banned"
-		}
-		current, findErr := service.FindProviderPoolAccount(context.Background(), &channel, account.AccountID)
-		if findErr == nil && current.NeedsLogin {
-			mark.Result = "login_required"
-		}
-		threshold := cfg.DegradeAfter
-		if threshold == 0 {
-			threshold = 3
-		}
-		err := service.UpdateProviderAccount(account.OwnerID, account.AccountID, func(state *model.ProviderAccountState) {
-			state.Health = mark.Result
-			state.LastError = mark.Reason
-			state.CheckedAt = time.Now().Unix()
-			if mark.Result == "login_required" || mark.Result == "account_banned" {
-				state.Disabled = true
-			}
-			if mark.Result == "passed" {
-				state.WrongAnswers = 0
-			}
-			if mark.Result == "wrong_answer" {
-				state.WrongAnswers++
-				if state.WrongAnswers >= threshold {
-					state.Degraded = true
-					state.Disabled = true
-				}
-			}
-			if mark.Result == "account_banned" {
-				state.Disabled = true
-			}
-		})
-		if err != nil {
+		evaluated, updateErr := evaluateProviderPoolAccountInspection(context.Background(), channel, account, testUserID, cfg, cfg.Model, question, index+1, false)
+		if updateErr != nil {
 			round.Failed = true
 		}
-		round.Accounts = append(round.Accounts, mark)
+		round.Accounts = append(round.Accounts, evaluated)
 	}
 	round.Time = time.Now().Unix()
 	raw, err := common.Marshal(round)
@@ -128,6 +67,179 @@ func inspectProviderPoolChannel(channel model.Channel, cfg inspectionConfig) err
 		return err
 	}
 	return model.UpdateOptionsBulk(map[string]string{inspectionKey(&channel, "last"): string(raw)})
+}
+
+func resolveSingleAccountInspectionModel(channel *model.Channel, cfg inspectionConfig) string {
+	if modelName := strings.TrimSpace(cfg.Model); modelName != "" {
+		return modelName
+	}
+	if channel.TestModel != nil {
+		if modelName := strings.TrimSpace(*channel.TestModel); modelName != "" {
+			return modelName
+		}
+	}
+	for _, m := range channel.GetModels() {
+		if modelName := strings.TrimSpace(m); modelName != "" {
+			return modelName
+		}
+	}
+	return ""
+}
+
+// inspectSingleProviderPoolAccount runs an explicit manual check on one account
+// even if that account is currently disabled, degraded, or previously flagged,
+// so administrators can verify whether upstream risk controls have been lifted.
+func inspectSingleProviderPoolAccount(ctx context.Context, channel model.Channel, account service.ProviderPoolAccount) (accountMark, string, error) {
+	lockKey := fmt.Sprintf("%d:%s", channel.Id, account.AccountID)
+	if _, busy := inspectingAccount.LoadOrStore(lockKey, true); busy {
+		return accountMark{}, "", errors.New("Account inspection already running")
+	}
+	defer inspectingAccount.Delete(lockKey)
+
+	cfg := inspectionSettings(&channel)
+	modelName := resolveSingleAccountInspectionModel(&channel, cfg)
+	if modelName == "" {
+		return accountMark{}, "", errors.New("Model is required")
+	}
+	if len(cfg.Questions) == 0 {
+		return accountMark{}, "", errors.New("invalid inspection settings")
+	}
+	testUserID, err := resolveChannelTestUserID(nil)
+	if err != nil {
+		return accountMark{}, "", err
+	}
+	var previous inspectionRound
+	readInspection(&channel, "last", &previous)
+	index := 0
+	if previous.Sequence > 0 {
+		index = (previous.Sequence - 1) % len(cfg.Questions)
+	}
+	question := cfg.Questions[index]
+	mark, updateErr := evaluateProviderPoolAccountInspection(ctx, channel, account, testUserID, cfg, modelName, question, index+1, true)
+	if updateErr != nil {
+		return mark, modelName, updateErr
+	}
+	_ = mergeSingleAccountInspectionRound(&channel, mark, question.Prompt, modelName)
+	return mark, modelName, nil
+}
+
+func evaluateProviderPoolAccountInspection(
+	parentCtx context.Context,
+	channel model.Channel,
+	account service.ProviderPoolAccount,
+	testUserID int,
+	cfg inspectionConfig,
+	modelName string,
+	question inspectionQuestion,
+	questionNumber int,
+	forceInspect bool,
+) (accountMark, error) {
+	if parentCtx == nil {
+		parentCtx = context.Background()
+	}
+	mark := accountMark{ID: account.AccountID, Label: account.Label, Time: time.Now().Unix(), Number: questionNumber, Result: "inconclusive"}
+	ctx, cancel := context.WithTimeout(parentCtx, 3*time.Minute)
+	result := testChannel(ctx, &channel, testUserID, modelName, string(constant.EndpointTypeOpenAI), false,
+		accountInspectionInput{
+			AccountID:    account.AccountID,
+			Group:        account.Profile.Category,
+			Prompt:       question.Prompt,
+			Effort:       cfg.ReasoningEffort,
+			ForceInspect: forceInspect,
+		})
+	cancel()
+	mark.Time = time.Now().Unix()
+	mark.Reason = inspectionCallFailureReason(result, &channel)
+	statusCode := result.statusCode
+	if statusCode == 0 && result.newAPIError != nil {
+		statusCode = result.newAPIError.StatusCode
+	}
+	if result.localErr == nil && result.newAPIError == nil {
+		var response struct {
+			Choices []struct {
+				Message struct {
+					Content string `json:"content"`
+				} `json:"message"`
+			} `json:"choices"`
+		}
+		if common.Unmarshal(result.response, &response) == nil && len(response.Choices) == 1 {
+			actual := response.Choices[0].Message.Content
+			if inspectionAnswerMatches(actual, question.Answer) {
+				mark.Result = "passed"
+				mark.Reason = ""
+			} else {
+				mark.Result = "wrong_answer"
+				mark.Reason = inspectionMismatchReason(question.Answer, actual)
+			}
+		} else {
+			mark.Reason = "Inspection response was not a valid chat completion"
+		}
+	} else if statusCode == http.StatusTooManyRequests {
+		mark.Result = "rate_limited"
+	} else if statusCode == http.StatusUnauthorized {
+		mark.Result = "login_required"
+	} else if statusCode == http.StatusForbidden && result.context != nil && result.context.GetBool("provider_pool_rejected") {
+		mark.Result = "account_banned"
+	}
+	if result.localErr != nil || result.newAPIError != nil {
+		current, findErr := service.FindProviderPoolAccount(context.Background(), &channel, account.AccountID)
+		if findErr == nil && current.NeedsLogin {
+			mark.Result = "login_required"
+		}
+	}
+	threshold := cfg.DegradeAfter
+	if threshold == 0 {
+		threshold = 3
+	}
+	err := service.UpdateProviderAccount(account.OwnerID, account.AccountID, func(state *model.ProviderAccountState) {
+		state.Health = mark.Result
+		state.LastError = mark.Reason
+		state.CheckedAt = mark.Time
+		if mark.Result == "login_required" || mark.Result == "account_banned" {
+			state.Disabled = true
+		}
+		if mark.Result == "passed" {
+			state.WrongAnswers = 0
+		}
+		if mark.Result == "wrong_answer" {
+			state.WrongAnswers++
+			if state.WrongAnswers >= threshold {
+				state.Degraded = true
+				state.Disabled = true
+			}
+		}
+	})
+	return mark, err
+}
+
+func mergeSingleAccountInspectionRound(channel *model.Channel, mark accountMark, prompt, modelName string) error {
+	var last inspectionRound
+	readInspection(channel, "last", &last)
+	replaced := false
+	for i := range last.Accounts {
+		if last.Accounts[i].ID == mark.ID {
+			last.Accounts[i] = mark
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		last.Accounts = append(last.Accounts, mark)
+	}
+	if last.Time == 0 {
+		last.Time = mark.Time
+	}
+	if last.Prompt == "" {
+		last.Prompt = prompt
+	}
+	if last.Model == "" {
+		last.Model = modelName
+	}
+	raw, err := common.Marshal(last)
+	if err != nil {
+		return err
+	}
+	return model.UpdateOptionsBulk(map[string]string{inspectionKey(channel, "last"): string(raw)})
 }
 
 func inspectionCallFailureReason(result testResult, channel *model.Channel) string {
