@@ -436,6 +436,9 @@ func matchAdvancedCustomRouteModelRule(rule string, model string) bool {
 }
 
 func matchAdvancedCustomIncomingPath(configuredPath string, requestPath string) bool {
+	if requestPath == "/pg/chat/completions" {
+		requestPath = advancedCustomEndpointPathOpenAIChat
+	}
 	if matchAdvancedCustomIncomingPathTemplate(configuredPath, requestPath) {
 		return true
 	}

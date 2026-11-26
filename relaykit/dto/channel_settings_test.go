@@ -335,6 +335,25 @@ func TestAdvancedCustomMatchPathForModel(t *testing.T) {
 	assert.Equal(t, advancedCustomConverterNone, fallbackRoute.Converter)
 }
 
+func TestAdvancedCustomMatchPathSupportsPlaygroundChatCompletions(t *testing.T) {
+	config := &AdvancedCustomConfig{
+		Routes: []AdvancedCustomRoute{
+			{
+				IncomingPath: "/v1/chat/completions",
+				UpstreamPath: "/backend-api/codex/responses",
+				Converter:    advancedCustomConverterOpenAIChatToOpenAIResponses,
+			},
+		},
+	}
+	require.NoError(t, config.Validate())
+
+	route, ok := config.MatchPathForModel("/pg/chat/completions", "gpt-6.2-sol")
+	require.True(t, ok)
+	assert.Equal(t, "/backend-api/codex/responses", route.UpstreamPath)
+	assert.True(t, config.SupportsPath("/pg/chat/completions"))
+	assert.False(t, config.SupportsPath("/pg/other"))
+}
+
 func TestAdvancedCustomMatchPathForModelRegexRules(t *testing.T) {
 	config := &AdvancedCustomConfig{
 		Routes: []AdvancedCustomRoute{

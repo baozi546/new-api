@@ -2,6 +2,7 @@ package controller
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -84,4 +85,22 @@ func TestChannelInspectionsUseProviderPoolAndPublishSafeResults(t *testing.T) {
 	require.Contains(t, adminJSON, "Invalid upstream response event")
 	require.Contains(t, adminJSON, "Pro account pool")
 	require.NotContains(t, adminJSON, "Legacy CPA")
+}
+
+func TestInspectionAnswerMatchingAndMismatchReason(t *testing.T) {
+	require.True(t, inspectionAnswerMatches("21", "21"))
+	require.True(t, inspectionAnswerMatches(" 21。\n", "21"))
+	require.True(t, inspectionAnswerMatches("**21**.", "21"))
+	require.True(t, inspectionAnswerMatches("`21`", "21"))
+	require.True(t, inspectionAnswerMatches("「高市早苗」。", "高市早苗"))
+	require.False(t, inspectionAnswerMatches("19", "21"))
+	require.False(t, inspectionAnswerMatches("答案是21", "21"))
+	require.False(t, inspectionAnswerMatches("", "21"))
+
+	require.Equal(t, `expected "21", got "19"`, inspectionMismatchReason("21", " 19\n"))
+	require.Equal(t, `expected "21", got "(empty)"`, inspectionMismatchReason("21", "   "))
+	longReply := strings.Repeat("字", 300)
+	reason := inspectionMismatchReason("21", longReply)
+	require.True(t, strings.HasPrefix(reason, `expected "21", got "`))
+	require.Contains(t, reason, "…")
 }

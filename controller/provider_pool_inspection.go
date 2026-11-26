@@ -3,9 +3,11 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -69,9 +71,12 @@ func inspectProviderPoolChannel(channel model.Channel, cfg inspectionConfig) err
 				} `json:"choices"`
 			}
 			if common.Unmarshal(result.response, &response) == nil && len(response.Choices) == 1 {
-				mark.Result = "wrong_answer"
-				if strings.TrimSpace(response.Choices[0].Message.Content) == strings.TrimSpace(question.Answer) {
+				actual := response.Choices[0].Message.Content
+				if inspectionAnswerMatches(actual, question.Answer) {
 					mark.Result = "passed"
+				} else {
+					mark.Result = "wrong_answer"
+					mark.Reason = inspectionMismatchReason(question.Answer, actual)
 				}
 			} else {
 				mark.Reason = "Inspection response was not a valid chat completion"
@@ -142,4 +147,41 @@ func inspectionCallFailureReason(result testResult, channel *model.Channel) stri
 		reason = string(runes[:maxReasonRunes]) + "…"
 	}
 	return reason
+}
+
+func normalizeInspectionAnswer(raw string) string {
+	const trimCutset = ".,!?;:。，！？；：、\"'“”‘’「」『』（）()[]【】`*"
+	trimmed := strings.TrimSpace(raw)
+	normalized := strings.TrimFunc(trimmed, func(r rune) bool {
+		return unicode.IsSpace(r) || strings.ContainsRune(trimCutset, r)
+	})
+	if normalized == "" {
+		return trimmed
+	}
+	return normalized
+}
+
+func inspectionAnswerMatches(actual, expected string) bool {
+	expectedTrimmed := strings.TrimSpace(expected)
+	actualTrimmed := strings.TrimSpace(actual)
+	if actualTrimmed == expectedTrimmed {
+		return true
+	}
+	expectedNorm := normalizeInspectionAnswer(expectedTrimmed)
+	actualNorm := normalizeInspectionAnswer(actualTrimmed)
+	return expectedNorm != "" && actualNorm == expectedNorm
+}
+
+func inspectionMismatchReason(expected, actual string) string {
+	expectedText := strings.Join(strings.Fields(strings.TrimSpace(expected)), " ")
+	actualText := strings.Join(strings.Fields(strings.TrimSpace(actual)), " ")
+	if actualText == "" {
+		actualText = "(empty)"
+	}
+	const maxActualRunes = 256
+	runes := []rune(actualText)
+	if len(runes) > maxActualRunes {
+		actualText = string(runes[:maxActualRunes]) + "…"
+	}
+	return fmt.Sprintf("expected %q, got %q", expectedText, actualText)
 }
